@@ -1,0 +1,27 @@
+name: Тесты
+
+# Обычная проверка тестов, отдельно от agent-merge.yml (тот только сливает ветки agent/...).
+# Коммиты бота слияния другие workflow не запускают, поэтому есть еженедельное расписание.
+on:
+  push:
+    branches: ['main', 'work/**']
+  pull_request:
+  schedule:
+    - cron: '41 3 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Тесты
+        run: npm test

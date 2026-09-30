@@ -1,0 +1,10 @@
+{
+  "name": "content-factory",
+  "version": "0.1.0",
+  "description": "Конвейер n8n: сбор новостей из RSS, отбор, переписывание нейросетью, проверка редактором и публикация в Телеграм",
+  "private": true,
+  "type": "commonjs",
+  "engines": { "node": ">=20" },
+  "scripts": { "test": "node --test" },
+  "license": "MIT"
+}

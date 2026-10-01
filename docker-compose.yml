@@ -1,0 +1,25 @@
+# n8n для content-factory. Запуск: cp .env.example .env, заполнить, docker compose up -d.
+# Подробно: docs/setup.md.
+services:
+  n8n:
+    # Версия закреплена: при обновлении сверить версию Node в образе (нужна 22.5+ для node:sqlite).
+    image: docker.n8n.io/n8nio/n8n:2.41.5
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5678:5678"
+    environment:
+      # Ключ шифрования учётных данных n8n. Потеряете его, и сохранённые ключи не расшифруются.
+      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY}
+      GENERIC_TIMEZONE: ${GENERIC_TIMEZONE}
+      TZ: ${GENERIC_TIMEZONE}
+      # Публичный HTTPS-адрес для вебхука Телеграма (кнопки бота редактора).
+      WEBHOOK_URL: ${WEBHOOK_URL}
+      # Узлам Code разрешён только встроенный модуль node:sqlite (журнал).
+      NODE_FUNCTION_ALLOW_BUILTIN: node:sqlite
+      N8N_DIAGNOSTICS_ENABLED: "false"
+    volumes:
+      # Здесь же лежит журнал: /home/node/.n8n/content-factory.sqlite
+      - n8n_data:/home/node/.n8n
+
+volumes:
+  n8n_data:

@@ -1,0 +1,22 @@
+{
+  "keywords": [
+    "нейросет",
+    "искусственный интеллект",
+    "ИИ",
+    "языков модел",
+    "LLM",
+    "GPT",
+    "ChatGPT",
+    "GigaChat",
+    "YandexGPT",
+    "машинн обучени",
+    "OpenAI",
+    "Anthropic",
+    "Claude",
+    "Gemini",
+    "агент"
+  ],
+  "exclude": ["гороскоп", "реклама"],
+  "similarityThreshold": 0.6,
+  "stemLength": 5
+}

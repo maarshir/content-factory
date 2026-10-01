@@ -1,0 +1,36 @@
+{
+  "checked": "2026-10-01",
+  "note": "Ленты проверены 01.10.2026: каждая отдаёт RSS 2.0 со свежими записями. Тематические ленты про ИИ идут почти целиком, в общих лентах новостей техники нужное отбирает filter.js по ключевым словам.",
+  "sources": [
+    {
+      "name": "Хабр: Искусственный интеллект",
+      "url": "https://habr.com/ru/rss/hubs/artificial_intelligence/articles/",
+      "kind": "topic"
+    },
+    {
+      "name": "Хабр: Машинное обучение",
+      "url": "https://habr.com/ru/rss/hubs/machine_learning/articles/",
+      "kind": "topic"
+    },
+    {
+      "name": "Хабр: Natural Language Processing",
+      "url": "https://habr.com/ru/rss/hubs/natural_language_processing/articles/",
+      "kind": "topic"
+    },
+    {
+      "name": "3DNews",
+      "url": "https://3dnews.ru/news/rss/",
+      "kind": "general"
+    },
+    {
+      "name": "CNews",
+      "url": "https://www.cnews.ru/inc/rss/news.xml",
+      "kind": "general"
+    },
+    {
+      "name": "iXBT.com",
+      "url": "https://www.ixbt.com/export/news.rss",
+      "kind": "general"
+    }
+  ]
+}

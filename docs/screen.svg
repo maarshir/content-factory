@@ -1,0 +1,114 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1070" height="966" viewBox="0 0 1070 966" font-family="-apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif">
+<defs><pattern id="d" width="20" height="20" patternUnits="userSpaceOnUse"><circle cx="2" cy="2" r="1.1" fill="#d5d8e0"/></pattern>
+<marker id="a" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#9aa0ac"/></marker></defs>
+<rect width="1070" height="966" rx="10" fill="#f5f6f8"/><rect width="1070" height="966" rx="10" fill="url(#d)"/>
+<text x="1054" y="954" text-anchor="end" font-size="11" fill="#9aa0ac">схема из workflows/*.json</text>
+<text x="30" y="34" font-size="15" font-weight="600" fill="#2b2d42">1. Сбор новостей и черновик</text>
+<path d="M94,88.0 C137.0,88.0 137.0,88.0 176,88.0" fill="none" stroke="#9aa0ac" stroke-width="2" marker-end="url(#a)"/>
+<path d="M244,88.0 C287.0,88.0 287.0,88.0 326,88.0" fill="none" stroke="#9aa0ac" stroke-width="2" marker-end="url(#a)"/>
+<path d="M394,88.0 C437.0,88.0 437.0,88.0 476,88.0" fill="none" stroke="#9aa0ac" stroke-width="2" marker-end="url(#a)"/>
+<path d="M544,88.0 C587.0,88.0 587.0,88.0 626,88.0" fill="none" stroke="#9aa0ac" stroke-width="2" marker-end="url(#a)"/>
+<path d="M694,88.0 h14 V157.0 H12 V218.0 H26" fill="none" stroke="#9aa0ac" stroke-width="2" marker-end="url(#a)"/>
+<path d="M94,218.0 C137.0,218.0 137.0,218.0 176,218.0" fill="none" stroke="#9aa0ac" stroke-width="2" marker-end="url(#a)"/>
+<path d="M244,218.0 C287.0,218.0 287.0,218.0 326,218.0" fill="none" stroke="#9aa0ac" stroke-width="2" marker-end="url(#a)"/>
+<path d="M394,218.0 C437.0,218.0 437.0,218.0 476,218.0" fill="none" stroke="#9aa0ac" stroke-width="2" marker-end="url(#a)"/>
+<rect x="30" y="56" width="64" height="64" rx="26" fill="#fff" stroke="#c9ccd6" stroke-width="2"/>
+<text x="62.0" y="97.8" text-anchor="middle" font-size="28" font-weight="700" fill="#ff6d5a">◷</text>
+<text x="62.0" y="138" text-anchor="middle" font-size="12.5" fill="#3d4152">Расписание</text>
+<rect x="180" y="56" width="64" height="64" rx="10" fill="#fff" stroke="#c9ccd6" stroke-width="2"/>
+<text x="212.0" y="97.8" text-anchor="middle" font-size="28" font-weight="700" fill="#4f8cff">✎</text>
+<text x="212.0" y="138" text-anchor="middle" font-size="12.5" fill="#3d4152">Настройки</text>
+<rect x="330" y="56" width="64" height="64" rx="10" fill="#fff" stroke="#c9ccd6" stroke-width="2"/>
+<text x="362.0" y="94.3" text-anchor="middle" font-size="18" font-weight="700" fill="#ff9b00">{ }</text>
+<text x="362.0" y="138" text-anchor="middle" font-size="12.5" fill="#3d4152">Ленты</text>
+<rect x="480" y="56" width="64" height="64" rx="10" fill="#fff" stroke="#c9ccd6" stroke-width="2"/>
+<text x="512.0" y="94.3" text-anchor="middle" font-size="18" font-weight="700" fill="#f26522">RSS</text>
+<text x="512.0" y="138" text-anchor="middle" font-size="12.5" fill="#3d4152">Чтение RSS</text>
+<rect x="630" y="56" width="64" height="64" rx="10" fill="#fff" stroke="#c9ccd6" stroke-width="2"/>
+<text x="662.0" y="94.3" text-anchor="middle" font-size="18" font-weight="700" fill="#ff9b00">{ }</text>
+<text x="662.0" y="138" text-anchor="middle" font-size="12.5" fill="#3d4152">Отбор</text>
+<rect x="30" y="186" width="64" height="64" rx="10" fill="#fff" stroke="#c9ccd6" stroke-width="2"/>
+<text x="62.0" y="224.3" text-anchor="middle" font-size="18" font-weight="700" fill="#ff9b00">{ }</text>
+<text x="62.0" y="268" text-anchor="middle" font-size="12.5" fill="#3d4152">Промпт</text>
+<rect x="180" y="186" width="64" height="64" rx="10" fill="#fff" stroke="#c9ccd6" stroke-width="2"/>
+<text x="212.0" y="227.8" text-anchor="middle" font-size="28" font-weight="700" fill="#2f7de1">⇅</text>
+<text x="212.0" y="268" text-anchor="middle" font-size="12.5" fill="#3d4152">Нейросеть</text>
+<rect x="330" y="186" width="64" height="64" rx="10" fill="#fff" stroke="#c9ccd6" stroke-width="2"/>
+<text x="362.0" y="224.3" text-anchor="middle" font-size="18" font-weight="700" fill="#ff9b00">{ }</text>
+<text x="362.0" y="268" text-anchor="middle" font-size="12.5" fill="#3d4152">Разбор</text>
+<text x="362.0" y="283" text-anchor="middle" font-size="12.5" fill="#3d4152">и пост</text>
+<rect x="480" y="186" width="64" height="64" rx="10" fill="#fff" stroke="#c9ccd6" stroke-width="2"/>
+<text x="512.0" y="227.8" text-anchor="middle" font-size="28" font-weight="700" fill="#29a9eb">✈</text>
+<text x="512.0" y="268" text-anchor="middle" font-size="12.5" fill="#3d4152">Черновик</text>
+<text x="512.0" y="283" text-anchor="middle" font-size="12.5" fill="#3d4152">редактору</text>
+<text x="30" y="342" font-size="15" font-weight="600" fill="#2b2d42">2. Бот редактора</text>
+<path d="M94,526.0 C137.0,526.0 137.0,526.0 176,526.0" fill="none" stroke="#9aa0ac" stroke-width="2" marker-end="url(#a)"/>
+<path d="M244,526.0 C287.0,526.0 287.0,526.0 326,526.0" fill="none" stroke="#9aa0ac" stroke-width="2" marker-end="url(#a)"/>
+<path d="M394,526.0 C437.0,526.0 437.0,396.0 476,396.0" fill="none" stroke="#9aa0ac" stroke-width="2" marker-end="url(#a)"/>
+<path d="M394,526.0 C437.0,526.0 437.0,526.0 476,526.0" fill="none" stroke="#9aa0ac" stroke-width="2" marker-end="url(#a)"/>
+<path d="M394,526.0 C437.0,526.0 437.0,656.0 476,656.0" fill="none" stroke="#9aa0ac" stroke-width="2" marker-end="url(#a)"/>
+<path d="M544,396.0 C587.0,396.0 587.0,396.0 626,396.0" fill="none" stroke="#9aa0ac" stroke-width="2" marker-end="url(#a)"/>
+<path d="M544,526.0 C587.0,526.0 587.0,526.0 626,526.0" fill="none" stroke="#9aa0ac" stroke-width="2" marker-end="url(#a)"/>
+<path d="M544,656.0 C587.0,656.0 587.0,656.0 626,656.0" fill="none" stroke="#9aa0ac" stroke-width="2" marker-end="url(#a)"/>
+<path d="M694,656.0 C737.0,656.0 737.0,656.0 776,656.0" fill="none" stroke="#9aa0ac" stroke-width="2" marker-end="url(#a)"/>
+<path d="M844,656.0 C887.0,656.0 887.0,656.0 926,656.0" fill="none" stroke="#9aa0ac" stroke-width="2" marker-end="url(#a)"/>
+<rect x="30" y="494" width="64" height="64" rx="26" fill="#fff" stroke="#c9ccd6" stroke-width="2"/>
+<text x="62.0" y="535.8" text-anchor="middle" font-size="28" font-weight="700" fill="#29a9eb">✈</text>
+<text x="62.0" y="576" text-anchor="middle" font-size="12.5" fill="#3d4152">Телеграм</text>
+<rect x="180" y="494" width="64" height="64" rx="10" fill="#fff" stroke="#c9ccd6" stroke-width="2"/>
+<text x="212.0" y="535.8" text-anchor="middle" font-size="28" font-weight="700" fill="#4f8cff">✎</text>
+<text x="212.0" y="576" text-anchor="middle" font-size="12.5" fill="#3d4152">Настройки</text>
+<rect x="330" y="494" width="64" height="64" rx="10" fill="#fff" stroke="#c9ccd6" stroke-width="2"/>
+<text x="362.0" y="532.3" text-anchor="middle" font-size="18" font-weight="700" fill="#ff9b00">{ }</text>
+<text x="362.0" y="576" text-anchor="middle" font-size="12.5" fill="#3d4152">Действие</text>
+<rect x="480" y="364" width="64" height="64" rx="10" fill="#fff" stroke="#c9ccd6" stroke-width="2"/>
+<text x="512.0" y="405.8" text-anchor="middle" font-size="28" font-weight="700" fill="#36b37e">⑂</text>
+<text x="512.0" y="446" text-anchor="middle" font-size="12.5" fill="#3d4152">Нажатие?</text>
+<rect x="480" y="494" width="64" height="64" rx="10" fill="#fff" stroke="#c9ccd6" stroke-width="2"/>
+<text x="512.0" y="535.8" text-anchor="middle" font-size="28" font-weight="700" fill="#36b37e">⑂</text>
+<text x="512.0" y="576" text-anchor="middle" font-size="12.5" fill="#3d4152">Правка?</text>
+<rect x="480" y="624" width="64" height="64" rx="10" fill="#fff" stroke="#c9ccd6" stroke-width="2"/>
+<text x="512.0" y="665.8" text-anchor="middle" font-size="28" font-weight="700" fill="#36b37e">⑂</text>
+<text x="512.0" y="706" text-anchor="middle" font-size="12.5" fill="#3d4152">Переписать?</text>
+<rect x="630" y="364" width="64" height="64" rx="10" fill="#fff" stroke="#c9ccd6" stroke-width="2"/>
+<text x="662.0" y="405.8" text-anchor="middle" font-size="28" font-weight="700" fill="#29a9eb">✈</text>
+<text x="662.0" y="446" text-anchor="middle" font-size="12.5" fill="#3d4152">Ответ</text>
+<text x="662.0" y="461" text-anchor="middle" font-size="12.5" fill="#3d4152">на нажатие</text>
+<rect x="630" y="494" width="64" height="64" rx="10" fill="#fff" stroke="#c9ccd6" stroke-width="2"/>
+<text x="662.0" y="535.8" text-anchor="middle" font-size="28" font-weight="700" fill="#29a9eb">✈</text>
+<text x="662.0" y="576" text-anchor="middle" font-size="12.5" fill="#3d4152">Правка</text>
+<text x="662.0" y="591" text-anchor="middle" font-size="12.5" fill="#3d4152">черновика</text>
+<rect x="630" y="624" width="64" height="64" rx="10" fill="#fff" stroke="#c9ccd6" stroke-width="2"/>
+<text x="662.0" y="665.8" text-anchor="middle" font-size="28" font-weight="700" fill="#2f7de1">⇅</text>
+<text x="662.0" y="706" text-anchor="middle" font-size="12.5" fill="#3d4152">Нейросеть</text>
+<rect x="780" y="624" width="64" height="64" rx="10" fill="#fff" stroke="#c9ccd6" stroke-width="2"/>
+<text x="812.0" y="662.3" text-anchor="middle" font-size="18" font-weight="700" fill="#ff9b00">{ }</text>
+<text x="812.0" y="706" text-anchor="middle" font-size="12.5" fill="#3d4152">Новый</text>
+<text x="812.0" y="721" text-anchor="middle" font-size="12.5" fill="#3d4152">черновик</text>
+<rect x="930" y="624" width="64" height="64" rx="10" fill="#fff" stroke="#c9ccd6" stroke-width="2"/>
+<text x="962.0" y="665.8" text-anchor="middle" font-size="28" font-weight="700" fill="#29a9eb">✈</text>
+<text x="962.0" y="706" text-anchor="middle" font-size="12.5" fill="#3d4152">Черновик</text>
+<text x="962.0" y="721" text-anchor="middle" font-size="12.5" fill="#3d4152">редактору</text>
+<text x="30" y="780" font-size="15" font-weight="600" fill="#2b2d42">3. Публикация по расписанию</text>
+<path d="M94,834.0 C137.0,834.0 137.0,834.0 176,834.0" fill="none" stroke="#9aa0ac" stroke-width="2" marker-end="url(#a)"/>
+<path d="M244,834.0 C287.0,834.0 287.0,834.0 326,834.0" fill="none" stroke="#9aa0ac" stroke-width="2" marker-end="url(#a)"/>
+<path d="M394,834.0 C437.0,834.0 437.0,834.0 476,834.0" fill="none" stroke="#9aa0ac" stroke-width="2" marker-end="url(#a)"/>
+<path d="M544,834.0 C587.0,834.0 587.0,834.0 626,834.0" fill="none" stroke="#9aa0ac" stroke-width="2" marker-end="url(#a)"/>
+<rect x="30" y="802" width="64" height="64" rx="26" fill="#fff" stroke="#c9ccd6" stroke-width="2"/>
+<text x="62.0" y="843.8" text-anchor="middle" font-size="28" font-weight="700" fill="#ff6d5a">◷</text>
+<text x="62.0" y="884" text-anchor="middle" font-size="12.5" fill="#3d4152">Расписание</text>
+<rect x="180" y="802" width="64" height="64" rx="10" fill="#fff" stroke="#c9ccd6" stroke-width="2"/>
+<text x="212.0" y="843.8" text-anchor="middle" font-size="28" font-weight="700" fill="#4f8cff">✎</text>
+<text x="212.0" y="884" text-anchor="middle" font-size="12.5" fill="#3d4152">Настройки</text>
+<rect x="330" y="802" width="64" height="64" rx="10" fill="#fff" stroke="#c9ccd6" stroke-width="2"/>
+<text x="362.0" y="840.3" text-anchor="middle" font-size="18" font-weight="700" fill="#ff9b00">{ }</text>
+<text x="362.0" y="884" text-anchor="middle" font-size="12.5" fill="#3d4152">Следующий</text>
+<text x="362.0" y="899" text-anchor="middle" font-size="12.5" fill="#3d4152">пост</text>
+<rect x="480" y="802" width="64" height="64" rx="10" fill="#fff" stroke="#c9ccd6" stroke-width="2"/>
+<text x="512.0" y="843.8" text-anchor="middle" font-size="28" font-weight="700" fill="#29a9eb">✈</text>
+<text x="512.0" y="884" text-anchor="middle" font-size="12.5" fill="#3d4152">Отправка</text>
+<text x="512.0" y="899" text-anchor="middle" font-size="12.5" fill="#3d4152">в канал</text>
+<rect x="630" y="802" width="64" height="64" rx="10" fill="#fff" stroke="#c9ccd6" stroke-width="2"/>
+<text x="662.0" y="840.3" text-anchor="middle" font-size="18" font-weight="700" fill="#ff9b00">{ }</text>
+<text x="662.0" y="884" text-anchor="middle" font-size="12.5" fill="#3d4152">Итог</text>
+</svg>

@@ -4,7 +4,12 @@
   "description": "Конвейер n8n: сбор новостей из RSS, отбор, переписывание нейросетью, проверка редактором и публикация в Телеграм",
   "private": true,
   "type": "commonjs",
-  "engines": { "node": ">=20" },
-  "scripts": { "test": "node --test" },
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test",
+    "build": "node scripts/build-workflows.js"
+  },
   "license": "MIT"
 }

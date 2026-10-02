@@ -3,12 +3,14 @@
 // методами run/get/all: node:sqlite (DatabaseSync) или better-sqlite3.
 'use strict';
 
-const STATUSES = ['collected', 'rejected', 'published'];
+const STATUSES = ['collected', 'queued', 'rejected', 'published'];
 
-// Разрешённые переходы. Опубликованное не откатывается: если пост удалили из
+// Разрешённые переходы. queued: редактор нажал «Опубликовать», пост ждёт
+// отправки в канал. Опубликованное не откатывается: если пост удалили из
 // канала, это отдельное событие, его в журнал пишет человек.
 const TRANSITIONS = {
-  collected: ['rejected', 'published'],
+  collected: ['queued', 'rejected', 'published'],
+  queued: ['published', 'rejected'],
   rejected: ['collected'],
   published: [],
 };
@@ -20,13 +22,14 @@ CREATE TABLE IF NOT EXISTS items (
   link TEXT NOT NULL,
   title TEXT NOT NULL,
   source TEXT,
-  status TEXT NOT NULL CHECK (status IN ('collected', 'rejected', 'published')),
+  status TEXT NOT NULL CHECK (status IN ('collected', 'queued', 'rejected', 'published')),
   reason TEXT,
   relevance REAL,
   message_id TEXT,
   post TEXT,
   collected_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
+  queued_at TEXT,
   published_at TEXT
 );
 CREATE INDEX IF NOT EXISTS items_status ON items (status);
@@ -57,7 +60,23 @@ function createLog(db, options = {}) {
 
   const get = (key) => db.prepare('SELECT * FROM items WHERE url_key = ?').get(key) || null;
 
+  // Журнал старой схемы (без статуса queued) переносится в новую таблицу с теми же записями.
   function init() {
+    const old = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'items'").get();
+    if (old && !String(old.sql).includes("'queued'")) {
+      const cols = db.prepare('PRAGMA table_info(items)').all().map((c) => c.name).join(', ');
+      db.exec('BEGIN');
+      try {
+        db.exec('ALTER TABLE items RENAME TO items_old; DROP INDEX IF EXISTS items_status; DROP INDEX IF EXISTS items_collected_at;');
+        db.exec(SCHEMA);
+        db.exec(`INSERT INTO items (${cols}) SELECT ${cols} FROM items_old; DROP TABLE items_old;`);
+        db.exec('COMMIT');
+      } catch (e) {
+        db.exec('ROLLBACK');
+        throw e;
+      }
+      return;
+    }
     db.exec(SCHEMA);
   }
 
@@ -88,12 +107,13 @@ function createLog(db, options = {}) {
     const t = now();
     db.prepare(
       `UPDATE items SET status = ?, reason = ?, relevance = ?, message_id = ?,
-       published_at = ?, updated_at = ? WHERE url_key = ?`
+       queued_at = ?, published_at = ?, updated_at = ? WHERE url_key = ?`
     ).run(
       status,
       fields.reason ?? null,
       fields.relevance ?? old.relevance ?? null,
       fields.messageId ?? old.message_id ?? null,
+      status === 'queued' ? t : status === 'published' ? old.queued_at ?? null : null,
       status === 'published' ? t : null,
       t,
       key
@@ -113,6 +133,13 @@ function createLog(db, options = {}) {
       throw new Error('нет номера сообщения в канале');
     }
     return move(link, 'published', { messageId: String(messageId), relevance: extra.relevance });
+  }
+
+  // Редактор нажал «Опубликовать»: пост с черновиком встаёт в очередь на отправку в канал.
+  function queued(link) {
+    const old = get(keyOf(link));
+    if (old && !old.post) throw new Error('в очередь только с черновиком');
+    return move(link, 'queued', {});
   }
 
   // Черновик поста от нейросети (HTML для Телеграма) для записи в статусе collected.
@@ -154,7 +181,7 @@ function createLog(db, options = {}) {
 
   // Сводка: сколько в каждом статусе и самые частые причины отказа.
   function stats() {
-    const counts = { collected: 0, rejected: 0, published: 0 };
+    const counts = { collected: 0, queued: 0, rejected: 0, published: 0 };
     for (const r of db.prepare('SELECT status, COUNT(*) AS n FROM items GROUP BY status').all()) {
       counts[r.status] = Number(r.n);
     }
@@ -165,10 +192,10 @@ function createLog(db, options = {}) {
       )
       .all()
       .map((r) => ({ reason: r.reason, count: Number(r.n) }));
-    return { ...counts, total: counts.collected + counts.rejected + counts.published, reasons };
+    return { ...counts, total: counts.collected + counts.queued + counts.rejected + counts.published, reasons };
   }
 
-  return { init, collected, drafted, rejected, published, reopen, seen, stats, byId, get: (link) => get(keyOf(link)) };
+  return { init, collected, drafted, queued, rejected, published, reopen, seen, stats, byId, get: (link) => get(keyOf(link)) };
 }
 
 if (typeof module !== 'undefined') {

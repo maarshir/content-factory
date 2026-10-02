@@ -19,6 +19,7 @@ const skip = DatabaseSync ? false : 'нет node:sqlite (нужен Node 22.5+)'
 
 test('конвейеры разбираются и связи ведут к существующим узлам', () => {
   assert.ok(files.includes('collect.json'));
+  assert.ok(files.includes('editor.json'));
   for (const f of files) {
     const wf = load(f);
     assert.ok(wf.name, f);
@@ -204,4 +205,151 @@ test('сбор: ошибка запроса к нейросети записыв
   assert.deepStrictEqual({ ...row }, { status: 'rejected', reason: 'ошибка запроса к нейросети' });
   conn.close();
   fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+test('бот редактора: узлы, ветки и кнопки', () => {
+  const wf = load('editor.json');
+  const byName = Object.fromEntries(wf.nodes.map((n) => [n.name, n]));
+  const types = {
+    Телеграм: 'n8n-nodes-base.telegramTrigger',
+    Настройки: 'n8n-nodes-base.set',
+    Действие: 'n8n-nodes-base.code',
+    'Нажатие?': 'n8n-nodes-base.if',
+    'Ответ на нажатие': 'n8n-nodes-base.telegram',
+    'Правка?': 'n8n-nodes-base.if',
+    'Правка черновика': 'n8n-nodes-base.telegram',
+    'Переписать?': 'n8n-nodes-base.if',
+    Нейросеть: 'n8n-nodes-base.httpRequest',
+    'Новый черновик': 'n8n-nodes-base.code',
+    'Черновик редактору': 'n8n-nodes-base.telegram',
+  };
+  for (const [name, type] of Object.entries(types)) assert.strictEqual(byName[name] && byName[name].type, type, name);
+  assert.strictEqual(wf.active, false);
+  assert.deepStrictEqual(byName['Телеграм'].parameters.updates, ['callback_query', 'message']);
+
+  const next = (from) => wf.connections[from].main[0].map((c) => c.node);
+  assert.deepStrictEqual(next('Телеграм'), ['Настройки']);
+  assert.deepStrictEqual(next('Настройки'), ['Действие']);
+  assert.deepStrictEqual(next('Действие').sort(), ['Нажатие?', 'Переписать?', 'Правка?']);
+  assert.deepStrictEqual(next('Нажатие?'), ['Ответ на нажатие']);
+  assert.deepStrictEqual(next('Правка?'), ['Правка черновика']);
+  assert.deepStrictEqual(next('Переписать?'), ['Нейросеть']);
+  assert.deepStrictEqual(next('Нейросеть'), ['Новый черновик']);
+  assert.deepStrictEqual(next('Новый черновик'), ['Черновик редактору']);
+  // Ветка «нет» у условий никуда не ведёт.
+  for (const n of ['Нажатие?', 'Правка?', 'Переписать?']) assert.ok(!wf.connections[n].main[1] || !wf.connections[n].main[1].length, n);
+
+  const settings = byName['Настройки'].parameters.assignments.assignments.map((a) => a.name);
+  for (const k of ['LLM_BASE_URL', 'LLM_MODEL', 'EDITOR_CHAT_ID', 'CF_DB_PATH', 'MAX_LENGTH']) assert.ok(settings.includes(k), k);
+
+  assert.strictEqual(byName['Ответ на нажатие'].parameters.resource, 'callback');
+  const edit = byName['Правка черновика'].parameters;
+  assert.strictEqual(edit.operation, 'editMessageText');
+  assert.strictEqual(edit.additionalFields.parse_mode, 'HTML');
+  assert.strictEqual(byName['Нейросеть'].parameters.nodeCredentialType, 'openAiApi');
+  const buttons = byName['Черновик редактору'].parameters.inlineKeyboard.rows[0].row.buttons;
+  assert.deepStrictEqual(
+    buttons.map((b) => b.additionalFields.callback_data),
+    ['=pub:{{ $json.id }}', '=rew:{{ $json.id }}', '=rej:{{ $json.id }}']
+  );
+  assert.match(byName['Черновик редактору'].parameters.chatId, /EDITOR_CHAT_ID/);
+});
+
+// Черновик в журнале, как его оставляет конвейер сбора.
+function editorDb() {
+  const { createLog } = require('../src/log.js');
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'cf-'));
+  const file = path.join(tmp, 'log.sqlite');
+  const conn = new DatabaseSync(file);
+  const log = createLog(conn);
+  log.init();
+  const add = (n) => {
+    const { item } = log.collected({ link: `https://example.com/${n}`, title: `Модель ${n} для русского языка`, source: 'Пример' });
+    log.drafted(item.link, `<b>Модель ${n} для русского языка</b>\n\nПрежний текст.\n\nИсточник: <a href="https://example.com/${n}">Пример</a>`, { relevance: 7 });
+    return item.id;
+  };
+  const ids = [add(1), add(2), add(3)];
+  conn.close();
+  const read = (id) => {
+    const c = new DatabaseSync(file);
+    const row = createLog(c).byId(id);
+    c.close();
+    return row;
+  };
+  return { file, ids, read, done: () => fs.rmSync(tmp, { recursive: true, force: true }) };
+}
+
+const EDITOR_CHAT = -100500;
+const tgPress = (data, chatId = EDITOR_CHAT) => ({
+  update_id: 1,
+  callback_query: { id: 'q1', data, message: { message_id: 77, chat: { id: chatId } } },
+});
+
+test('бот редактора: кнопки на подменённых обновлениях', { skip }, async () => {
+  const wf = load('editor.json');
+  const db = editorDb();
+  const settings = j([{ CF_DB_PATH: db.file, EDITOR_CHAT_ID: String(EDITOR_CHAT), MAX_LENGTH: 900 }]);
+  const run = async (update) => {
+    const nodes = { Настройки: settings, Телеграм: j([update]) };
+    return (await runNode(wf, 'Действие', settings, nodes)).map((x) => x.json);
+  };
+
+  const [pub] = await run(tgPress(`pub:${db.ids[0]}`));
+  assert.deepStrictEqual([pub.answer, pub.callbackQueryId, pub.chatId, pub.messageId, pub.prompt], ['Поставлено в очередь', 'q1', EDITOR_CHAT, 77, '']);
+  assert.match(pub.editText, /^В очереди на публикацию\n\n<b>Модель 1/);
+  assert.strictEqual(db.read(db.ids[0]).status, 'queued');
+
+  const [rej] = await run(tgPress(`rej:${db.ids[1]}`));
+  assert.strictEqual(rej.answer, 'Отклонено');
+  assert.deepStrictEqual([db.read(db.ids[1]).status, db.read(db.ids[1]).reason], ['rejected', 'отклонено редактором']);
+
+  const [denied] = await run(tgPress(`pub:${db.ids[2]}`, 42));
+  assert.deepStrictEqual([denied.answer, denied.editText, denied.prompt], ['Нет доступа', '', '']);
+  assert.strictEqual(db.read(db.ids[2]).status, 'collected');
+
+  // Сообщение не ответом на черновик: без ответа и без действий.
+  assert.deepStrictEqual(await run({ message: { chat: { id: EDITOR_CHAT }, text: 'привет' } }), []);
+  db.done();
+});
+
+test('бот редактора: «Переписать» с пометкой, новый черновик и сбой нейросети', { skip }, async () => {
+  const wf = load('editor.json');
+  const db = editorDb();
+  const id = db.ids[2];
+  const settings = j([{ CF_DB_PATH: db.file, EDITOR_CHAT_ID: String(EDITOR_CHAT), MAX_LENGTH: 900 }]);
+  const update = {
+    message: {
+      message_id: 91,
+      chat: { id: EDITOR_CHAT },
+      text: 'Короче и без оценок',
+      reply_to_message: { message_id: 77, reply_markup: { inline_keyboard: [[{ text: 'Опубликовать', callback_data: `pub:${id}` }]] } },
+    },
+  };
+  const nodes = { Настройки: settings, Телеграм: j([update]) };
+  nodes['Действие'] = await runNode(wf, 'Действие', settings, nodes);
+  const a = nodes['Действие'][0].json;
+  assert.strictEqual(a.callbackQueryId, '');
+  assert.match(a.editText, /^Отправлено на переписывание/);
+  assert.match(a.prompt, /Пометка редактора: Короче и без оценок/);
+  assert.match(a.prompt, /Прежний текст поста:\nПрежний текст\.\n/);
+  assert.match(a.prompt, /не длиннее 900 знаков/);
+  assert.doesNotMatch(a.prompt, /\{\{|<b>|Источник:/);
+
+  // Синтетический ответ нейросети: оценка ниже порога сбора не мешает, редактор уже решил.
+  const answer = { choices: [{ message: { content: JSON.stringify({ relevance: 4, text: 'Новый короткий текст о модели для русского языка без оценок.' }) } }] };
+  const [ok] = (await runNode(wf, 'Новый черновик', j([answer]), nodes)).map((x) => x.json);
+  assert.strictEqual(ok.id, id);
+  assert.strictEqual(ok.rewritten, true);
+  assert.match(ok.editorText, /^Переписано\. Оценка нейросети: 4\/10\n\n<b>Модель 3 для русского языка<\/b>\n\nНовый короткий текст/);
+  const row = db.read(id);
+  assert.deepStrictEqual([row.status, row.relevance], ['collected', 4]);
+  assert.match(row.post, /Новый короткий текст/);
+
+  // Ошибка запроса: прежний черновик возвращается редактору, запись не теряется.
+  const [fail] = (await runNode(wf, 'Новый черновик', j([{ error: { message: '429' } }]), nodes)).map((x) => x.json);
+  assert.strictEqual(fail.rewritten, false);
+  assert.match(fail.editorText, /^Не переписано \(ошибка запроса к нейросети\)\n\n<b>Модель 3/);
+  assert.strictEqual(db.read(id).post, row.post);
+  assert.strictEqual(db.read(id).status, 'collected');
+  db.done();
 });

@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS items (
   reason TEXT,
   relevance REAL,
   message_id TEXT,
+  post TEXT,
   collected_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   published_at TEXT
@@ -114,6 +115,29 @@ function createLog(db, options = {}) {
     return move(link, 'published', { messageId: String(messageId), relevance: extra.relevance });
   }
 
+  // Черновик поста от нейросети (HTML для Телеграма) для записи в статусе collected.
+  // Статус не меняется: публикует редактор кнопкой в боте.
+  function drafted(link, post, extra = {}) {
+    const text = String(post ?? '').trim();
+    if (!text) throw new Error('пустой черновик');
+    const key = keyOf(link);
+    const old = get(key);
+    if (!old) throw new Error(`нет в журнале: ${link}`);
+    if (old.status !== 'collected') throw new Error(`черновик только для collected, сейчас ${old.status}`);
+    db.prepare('UPDATE items SET post = ?, relevance = ?, updated_at = ? WHERE url_key = ?').run(
+      text,
+      extra.relevance ?? old.relevance ?? null,
+      now(),
+      key
+    );
+    return get(key);
+  }
+
+  // Запись по номеру: кнопки бота редактора передают номер, ссылка в 64 байта не влезает.
+  function byId(id) {
+    return db.prepare('SELECT * FROM items WHERE id = ?').get(Number(id)) || null;
+  }
+
   // Редактор вернул отклонённое в работу («Переписать»).
   function reopen(link) {
     return move(link, 'collected', {});
@@ -144,7 +168,7 @@ function createLog(db, options = {}) {
     return { ...counts, total: counts.collected + counts.rejected + counts.published, reasons };
   }
 
-  return { init, collected, rejected, published, reopen, seen, stats, get: (link) => get(keyOf(link)) };
+  return { init, collected, drafted, rejected, published, reopen, seen, stats, byId, get: (link) => get(keyOf(link)) };
 }
 
 if (typeof module !== 'undefined') {

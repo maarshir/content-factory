@@ -120,14 +120,20 @@ test('ошибка Телеграма: пост остаётся в очеред
 test('журнал без счётчика попыток получает его при init()', { skip }, () => {
   const db = new DatabaseSync(':memory:');
   const queue = createQueue(db);
-  assert.throws(() => queue.init(), /log\.init/);
+  assert.strictEqual(queue.init(), false);
   const log = createLog(db, { now: () => '2026-10-01T07:00:00.000Z' });
   log.init();
   log.collected({ link: link(1), title: 'Новость 1' });
-  queue.init();
-  queue.init();
+  assert.strictEqual(queue.init(), true);
+  assert.strictEqual(queue.init(), true);
   assert.strictEqual(log.get(link(1)).attempts, 0);
   // Журнал с новым столбцом читается log.js как раньше.
   log.init();
   assert.strictEqual(log.stats().collected, 1);
+});
+
+test('журнал прежней схемы очередь не трогает', { skip }, () => {
+  const db = new DatabaseSync(':memory:');
+  db.exec("CREATE TABLE items (id INTEGER PRIMARY KEY, status TEXT CHECK (status IN ('collected', 'rejected', 'published')))");
+  assert.throws(() => createQueue(db).init(), /прежней схемы/);
 });

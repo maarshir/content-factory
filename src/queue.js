@@ -48,10 +48,15 @@ function createQueue(db, options = {}) {
   const byId = (id) => db.prepare('SELECT * FROM items WHERE id = ?').get(Number(id)) || null;
 
   // Счётчик неудачных отправок; журнал без него получает столбец с нулём.
+  // false: журнала ещё нет (конвейер сбора не запускался), публиковать нечего.
+  // Журнал прежней схемы переносит log.init(), до этого очередь его не трогает.
   function init() {
+    const table = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'items'").get();
+    if (!table) return false;
+    if (!String(table.sql).includes("'queued'")) throw new Error('журнал прежней схемы: сначала log.init()');
     const cols = db.prepare('PRAGMA table_info(items)').all().map((c) => c.name);
-    if (!cols.length) throw new Error('нет таблицы журнала: сначала log.init()');
     if (!cols.includes('attempts')) db.exec('ALTER TABLE items ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0');
+    return true;
   }
 
   // Следующий пост или причина подождать: { item, wait }, где wait = null (можно отправлять),

@@ -1,0 +1,6 @@
+{
+  "minIntervalMinutes": 60,
+  "quietHours": { "from": "23:00", "to": "08:00" },
+  "timeZone": "Europe/Moscow",
+  "maxAttempts": 3
+}

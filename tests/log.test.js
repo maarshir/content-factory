@@ -32,9 +32,9 @@ test('без объекта базы журнал не создаётся', () =
   assert.throws(() => createLog({ exec() {} }), TypeError);
 });
 
-test('в схеме три статуса и уникальная ссылка', () => {
+test('в схеме четыре статуса и уникальная ссылка', () => {
   assert.match(SCHEMA, /url_key TEXT NOT NULL UNIQUE/);
-  assert.match(SCHEMA, /'collected', 'rejected', 'published'/);
+  assert.match(SCHEMA, /'collected', 'queued', 'rejected', 'published'/);
 });
 
 test('собрано, отклонено с причиной, опубликовано', { skip }, () => {
@@ -52,6 +52,7 @@ test('собрано, отклонено с причиной, опубликов
   assert.ok(p.published_at);
   assert.deepStrictEqual(log.stats(), {
     collected: 1,
+    queued: 0,
     rejected: 1,
     published: 1,
     total: 3,

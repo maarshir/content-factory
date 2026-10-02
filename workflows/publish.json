@@ -1,0 +1,156 @@
+{
+  "name": "content-factory: публикация",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 15
+            }
+          ]
+        }
+      },
+      "id": "c0a1e5d2-0301-4c6f-8a01-000000000301",
+      "name": "Расписание",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "notes": "Проверка очереди раз в 15 минут. Как часто публиковать и тихие часы задаёт src/publish.config.json."
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "s1",
+              "name": "TELEGRAM_CHANNEL_ID",
+              "value": "",
+              "type": "string"
+            },
+            {
+              "id": "s2",
+              "name": "CF_DB_PATH",
+              "value": "/home/node/.n8n/content-factory.sqlite",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "c0a1e5d2-0302-4c6f-8a01-000000000302",
+      "name": "Настройки",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        220,
+        0
+      ],
+      "notes": "Заполнить TELEGRAM_CHANNEL_ID (@имя канала или числовой номер). Бот должен быть администратором канала. CF_DB_PATH тот же, что в других конвейерах. Ключей здесь нет."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Узел «Следующий пост»: первый пост из очереди, если сейчас можно публиковать.\n// Тихие часы, интервал между публикациями и число попыток в src/publish.config.json.\n// Пустой выход (нечего или рано публиковать) завершает запуск без отправки.\n// src/queue.js (вклеено scripts/build-workflows.js, править в src/)\nconst queueLib = (() => {\n  const module = { exports: {} };\n// Очередь публикации поверх журнала log.js: какой пост отправить в канал следующим\n// и что делать, если Телеграм его не принял. Та же база, что у createLog\n// (node:sqlite или better-sqlite3); вызывать init() после log.init().\n'use strict';\n\nconst TIME = /^([01]\\d|2[0-3]):([0-5]\\d)$/;\nconst toMinutes = (s) => {\n  const m = String(s).match(TIME);\n  if (!m) throw new Error(`время в виде ЧЧ:ММ, получено: ${s}`);\n  return Number(m[1]) * 60 + Number(m[2]);\n};\n\n// Настройки из publish.config.json с проверкой и значениями по умолчанию.\nfunction checkPublishConfig(config = {}) {\n  const minIntervalMinutes = Number(config.minIntervalMinutes ?? 60);\n  if (!Number.isFinite(minIntervalMinutes) || minIntervalMinutes < 0) throw new Error('minIntervalMinutes: число от 0');\n  const maxAttempts = Number(config.maxAttempts ?? 3);\n  if (!Number.isInteger(maxAttempts) || maxAttempts < 1) throw new Error('maxAttempts: целое от 1');\n  const timeZone = config.timeZone || 'Europe/Moscow';\n  // Неизвестный часовой пояс Intl отвергает сразу.\n  new Intl.DateTimeFormat('en-GB', { timeZone });\n  const quietHours = config.quietHours\n    ? { from: toMinutes(config.quietHours.from), to: toMinutes(config.quietHours.to) }\n    : null;\n  return { minIntervalMinutes, maxAttempts, timeZone, quietHours };\n}\n\n// Попадает ли момент ms в тихие часы { from, to } (минуты от полуночи) по местному времени.\n// from > to: интервал через полночь (23:00–08:00); from == to: тихих часов нет.\nfunction inQuietHours(ms, quiet, timeZone) {\n  if (quiet.from === quiet.to) return false;\n  const parts = new Intl.DateTimeFormat('en-GB', {\n    timeZone,\n    hour: '2-digit',\n    minute: '2-digit',\n    hourCycle: 'h23',\n  }).formatToParts(new Date(ms));\n  const part = (type) => Number(parts.find((p) => p.type === type).value);\n  const m = part('hour') * 60 + part('minute');\n  return quiet.from < quiet.to ? m >= quiet.from && m < quiet.to : m >= quiet.from || m < quiet.to;\n}\n\nfunction createQueue(db, options = {}) {\n  if (!db || typeof db.exec !== 'function' || typeof db.prepare !== 'function') {\n    throw new TypeError('нужен объект базы с exec и prepare');\n  }\n  const now = options.now || (() => new Date().toISOString());\n  const byId = (id) => db.prepare('SELECT * FROM items WHERE id = ?').get(Number(id)) || null;\n\n  // Счётчик неудачных отправок; журнал без него получает столбец с нулём.\n  // false: журнала ещё нет (конвейер сбора не запускался), публиковать нечего.\n  // Журнал прежней схемы переносит log.init(), до этого очередь его не трогает.\n  function init() {\n    const table = db.prepare(\"SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'items'\").get();\n    if (!table) return false;\n    if (!String(table.sql).includes(\"'queued'\")) throw new Error('журнал прежней схемы: сначала log.init()');\n    const cols = db.prepare('PRAGMA table_info(items)').all().map((c) => c.name);\n    if (!cols.includes('attempts')) db.exec('ALTER TABLE items ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0');\n    return true;\n  }\n\n  // Следующий пост или причина подождать: { item, wait }, где wait = null (можно отправлять),\n  // 'quiet' (тихие часы), 'interval' (с прошлой публикации меньше minIntervalMinutes),\n  // 'empty' (в очереди нечего отправлять). Первым идёт поставленный в очередь раньше.\n  // Пост, который Телеграм не принял maxAttempts раз, остаётся в очереди с ошибкой,\n  // но пропускается, чтобы не держать остальные.\n  function next(config = {}) {\n    const cfg = checkPublishConfig(config);\n    const ms = Date.parse(now());\n    if (cfg.quietHours && inQuietHours(ms, cfg.quietHours, cfg.timeZone)) return { item: null, wait: 'quiet' };\n    const last = db.prepare(\"SELECT MAX(published_at) AS t FROM items WHERE status = 'published'\").get();\n    if (last && last.t && ms - Date.parse(last.t) < cfg.minIntervalMinutes * 60000) {\n      return { item: null, wait: 'interval' };\n    }\n    const item =\n      db\n        .prepare(\n          `SELECT * FROM items WHERE status = 'queued' AND post IS NOT NULL AND attempts < ?\n           ORDER BY queued_at, id LIMIT 1`\n        )\n        .get(cfg.maxAttempts) || null;\n    return { item, wait: item ? null : 'empty' };\n  }\n\n  // Телеграм не принял пост: он остаётся в очереди, в reason ошибка, счётчик растёт.\n  function failed(id, error) {\n    const old = byId(id);\n    if (!old) throw new Error(`нет в журнале: ${id}`);\n    if (old.status !== 'queued') throw new Error(`ошибка отправки только для queued, сейчас ${old.status}`);\n    const text = String(error ?? '').trim().slice(0, 300) || 'неизвестная ошибка';\n    db.prepare('UPDATE items SET reason = ?, attempts = attempts + 1, updated_at = ? WHERE id = ?').run(\n      'ошибка Телеграма: ' + text,\n      now(),\n      old.id\n    );\n    return byId(old.id);\n  }\n\n  // Телеграм принял пост: статус published и номер сообщения в канале, ошибка стирается.\n  // Те же правила, что у log.published, только по номеру записи из узла «Следующий пост».\n  function published(id, messageId) {\n    if (messageId === undefined || messageId === null || String(messageId).trim() === '') {\n      throw new Error('нет номера сообщения в канале');\n    }\n    const old = byId(id);\n    if (!old) throw new Error(`нет в журнале: ${id}`);\n    if (old.status !== 'queued') throw new Error(`публикация только из queued, сейчас ${old.status}`);\n    const t = now();\n    db.prepare(\n      `UPDATE items SET status = 'published', message_id = ?, reason = NULL, published_at = ?, updated_at = ?\n       WHERE id = ?`\n    ).run(String(messageId), t, t, old.id);\n    return byId(old.id);\n  }\n\n  return { init, next, failed, published };\n}\n\nif (typeof module !== 'undefined') {\n  module.exports = { checkPublishConfig, inQuietHours, createQueue };\n}\n  return module.exports;\n})();\n// src/publish.config.json (вклеено scripts/build-workflows.js, править в src/)\nconst CONFIG = {\"minIntervalMinutes\":60,\"quietHours\":{\"from\":\"23:00\",\"to\":\"08:00\"},\"timeZone\":\"Europe/Moscow\",\"maxAttempts\":3};\n\nconst { DatabaseSync } = require('node:sqlite');\nconst settings = $('Настройки').first().json;\n\nconst db = new DatabaseSync(settings.CF_DB_PATH);\ntry {\n  const queue = queueLib.createQueue(db);\n  // Журнала ещё нет: конвейер сбора не запускался.\n  if (!queue.init()) return [];\n  const { item } = queue.next(CONFIG);\n  if (!item) return [];\n  return [{ json: { id: item.id, link: item.link, text: item.post } }];\n} finally {\n  db.close();\n}\n"
+      },
+      "id": "c0a1e5d2-0303-4c6f-8a01-000000000303",
+      "name": "Следующий пост",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        0
+      ],
+      "notes": "Код: src/nodes/publish-next.js"
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Настройки').first().json.TELEGRAM_CHANNEL_ID }}",
+        "text": "={{ $json.text }}",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML"
+        }
+      },
+      "id": "c0a1e5d2-0304-4c6f-8a01-000000000304",
+      "name": "Отправка в канал",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        660,
+        0
+      ],
+      "onError": "continueRegularOutput",
+      "notes": "Токен бота в учётных данных Telegram. Без повторов: при обрыве после отправки повтор дал бы пост дважды. Ошибка идёт дальше в «Итог»."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Узел «Итог»: ответ Телеграма -> журнал. Есть номер сообщения: пост опубликован.\n// Ошибка Телеграма пишется в журнал, пост остаётся в очереди до следующего запуска.\n// Журнал уже подготовлен узлом «Следующий пост» (queue.init).\n// src/queue.js (вклеено scripts/build-workflows.js, править в src/)\nconst queueLib = (() => {\n  const module = { exports: {} };\n// Очередь публикации поверх журнала log.js: какой пост отправить в канал следующим\n// и что делать, если Телеграм его не принял. Та же база, что у createLog\n// (node:sqlite или better-sqlite3); вызывать init() после log.init().\n'use strict';\n\nconst TIME = /^([01]\\d|2[0-3]):([0-5]\\d)$/;\nconst toMinutes = (s) => {\n  const m = String(s).match(TIME);\n  if (!m) throw new Error(`время в виде ЧЧ:ММ, получено: ${s}`);\n  return Number(m[1]) * 60 + Number(m[2]);\n};\n\n// Настройки из publish.config.json с проверкой и значениями по умолчанию.\nfunction checkPublishConfig(config = {}) {\n  const minIntervalMinutes = Number(config.minIntervalMinutes ?? 60);\n  if (!Number.isFinite(minIntervalMinutes) || minIntervalMinutes < 0) throw new Error('minIntervalMinutes: число от 0');\n  const maxAttempts = Number(config.maxAttempts ?? 3);\n  if (!Number.isInteger(maxAttempts) || maxAttempts < 1) throw new Error('maxAttempts: целое от 1');\n  const timeZone = config.timeZone || 'Europe/Moscow';\n  // Неизвестный часовой пояс Intl отвергает сразу.\n  new Intl.DateTimeFormat('en-GB', { timeZone });\n  const quietHours = config.quietHours\n    ? { from: toMinutes(config.quietHours.from), to: toMinutes(config.quietHours.to) }\n    : null;\n  return { minIntervalMinutes, maxAttempts, timeZone, quietHours };\n}\n\n// Попадает ли момент ms в тихие часы { from, to } (минуты от полуночи) по местному времени.\n// from > to: интервал через полночь (23:00–08:00); from == to: тихих часов нет.\nfunction inQuietHours(ms, quiet, timeZone) {\n  if (quiet.from === quiet.to) return false;\n  const parts = new Intl.DateTimeFormat('en-GB', {\n    timeZone,\n    hour: '2-digit',\n    minute: '2-digit',\n    hourCycle: 'h23',\n  }).formatToParts(new Date(ms));\n  const part = (type) => Number(parts.find((p) => p.type === type).value);\n  const m = part('hour') * 60 + part('minute');\n  return quiet.from < quiet.to ? m >= quiet.from && m < quiet.to : m >= quiet.from || m < quiet.to;\n}\n\nfunction createQueue(db, options = {}) {\n  if (!db || typeof db.exec !== 'function' || typeof db.prepare !== 'function') {\n    throw new TypeError('нужен объект базы с exec и prepare');\n  }\n  const now = options.now || (() => new Date().toISOString());\n  const byId = (id) => db.prepare('SELECT * FROM items WHERE id = ?').get(Number(id)) || null;\n\n  // Счётчик неудачных отправок; журнал без него получает столбец с нулём.\n  // false: журнала ещё нет (конвейер сбора не запускался), публиковать нечего.\n  // Журнал прежней схемы переносит log.init(), до этого очередь его не трогает.\n  function init() {\n    const table = db.prepare(\"SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'items'\").get();\n    if (!table) return false;\n    if (!String(table.sql).includes(\"'queued'\")) throw new Error('журнал прежней схемы: сначала log.init()');\n    const cols = db.prepare('PRAGMA table_info(items)').all().map((c) => c.name);\n    if (!cols.includes('attempts')) db.exec('ALTER TABLE items ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0');\n    return true;\n  }\n\n  // Следующий пост или причина подождать: { item, wait }, где wait = null (можно отправлять),\n  // 'quiet' (тихие часы), 'interval' (с прошлой публикации меньше minIntervalMinutes),\n  // 'empty' (в очереди нечего отправлять). Первым идёт поставленный в очередь раньше.\n  // Пост, который Телеграм не принял maxAttempts раз, остаётся в очереди с ошибкой,\n  // но пропускается, чтобы не держать остальные.\n  function next(config = {}) {\n    const cfg = checkPublishConfig(config);\n    const ms = Date.parse(now());\n    if (cfg.quietHours && inQuietHours(ms, cfg.quietHours, cfg.timeZone)) return { item: null, wait: 'quiet' };\n    const last = db.prepare(\"SELECT MAX(published_at) AS t FROM items WHERE status = 'published'\").get();\n    if (last && last.t && ms - Date.parse(last.t) < cfg.minIntervalMinutes * 60000) {\n      return { item: null, wait: 'interval' };\n    }\n    const item =\n      db\n        .prepare(\n          `SELECT * FROM items WHERE status = 'queued' AND post IS NOT NULL AND attempts < ?\n           ORDER BY queued_at, id LIMIT 1`\n        )\n        .get(cfg.maxAttempts) || null;\n    return { item, wait: item ? null : 'empty' };\n  }\n\n  // Телеграм не принял пост: он остаётся в очереди, в reason ошибка, счётчик растёт.\n  function failed(id, error) {\n    const old = byId(id);\n    if (!old) throw new Error(`нет в журнале: ${id}`);\n    if (old.status !== 'queued') throw new Error(`ошибка отправки только для queued, сейчас ${old.status}`);\n    const text = String(error ?? '').trim().slice(0, 300) || 'неизвестная ошибка';\n    db.prepare('UPDATE items SET reason = ?, attempts = attempts + 1, updated_at = ? WHERE id = ?').run(\n      'ошибка Телеграма: ' + text,\n      now(),\n      old.id\n    );\n    return byId(old.id);\n  }\n\n  // Телеграм принял пост: статус published и номер сообщения в канале, ошибка стирается.\n  // Те же правила, что у log.published, только по номеру записи из узла «Следующий пост».\n  function published(id, messageId) {\n    if (messageId === undefined || messageId === null || String(messageId).trim() === '') {\n      throw new Error('нет номера сообщения в канале');\n    }\n    const old = byId(id);\n    if (!old) throw new Error(`нет в журнале: ${id}`);\n    if (old.status !== 'queued') throw new Error(`публикация только из queued, сейчас ${old.status}`);\n    const t = now();\n    db.prepare(\n      `UPDATE items SET status = 'published', message_id = ?, reason = NULL, published_at = ?, updated_at = ?\n       WHERE id = ?`\n    ).run(String(messageId), t, t, old.id);\n    return byId(old.id);\n  }\n\n  return { init, next, failed, published };\n}\n\nif (typeof module !== 'undefined') {\n  module.exports = { checkPublishConfig, inQuietHours, createQueue };\n}\n  return module.exports;\n})();\n\nconst { DatabaseSync } = require('node:sqlite');\nconst settings = $('Настройки').first().json;\nconst post = $('Следующий пост').first().json;\nconst res = $input.first().json || {};\n\n// Узел Telegram отдаёт ответ API ({ ok, result: { message_id } }), при ошибке { error }.\nconst messageId = res.result && res.result.message_id != null ? res.result.message_id : res.message_id;\nconst errorText = (e) => (e && typeof e === 'object' ? e.description || e.message || JSON.stringify(e) : e);\n\nconst db = new DatabaseSync(settings.CF_DB_PATH);\ntry {\n  const queue = queueLib.createQueue(db);\n  if (messageId != null && String(messageId) !== '') {\n    queue.published(post.id, messageId);\n    return [{ json: { id: post.id, status: 'published', messageId: String(messageId), error: '' } }];\n  }\n  const error = String(errorText(res.error) || 'нет номера сообщения в ответе Телеграма');\n  const row = queue.failed(post.id, error);\n  return [{ json: { id: post.id, status: 'queued', messageId: '', error, attempts: row.attempts } }];\n} finally {\n  db.close();\n}\n"
+      },
+      "id": "c0a1e5d2-0305-4c6f-8a01-000000000305",
+      "name": "Итог",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        0
+      ],
+      "notes": "Код: src/nodes/publish-result.js"
+    }
+  ],
+  "connections": {
+    "Расписание": {
+      "main": [
+        [
+          {
+            "node": "Настройки",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Настройки": {
+      "main": [
+        [
+          {
+            "node": "Следующий пост",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Следующий пост": {
+      "main": [
+        [
+          {
+            "node": "Отправка в канал",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Отправка в канал": {
+      "main": [
+        [
+          {
+            "node": "Итог",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Europe/Moscow"
+  },
+  "pinData": {},
+  "active": false
+}

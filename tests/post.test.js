@@ -70,3 +70,58 @@ test('промпт Телеграма: все поля подставляютс�
   assert.ok(!/\{\{\s*\w+\s*\}\}/.test(filled));
   assert.ok(filled.includes('"relevance"') && filled.includes('"text"'));
 });
+
+const { buildVkPost, buildPostFor, platformOf, VK_TEXT_LIMIT } = require('../src/post');
+
+test('ВКонтакте: простой текст без HTML, ссылка последней строкой', () => {
+  const p = buildVkPost({ title: 'Модель <X> & R&D', text: 'Первый абзац.\r\n\r\n\r\n\r\nВторой абзац с <тегом>.', link: 'https://www.a.ru/n?a=1&b=2' });
+  assert.strictEqual(
+    p.text,
+    'Модель <X> & R&D\n\nПервый абзац.\n\nВторой абзац с <тегом>.\n\nИсточник: a.ru\nhttps://www.a.ru/n?a=1&b=2'
+  );
+  assert.ok(!('parse_mode' in p));
+  assert.strictEqual(p.visibleLength, p.text.length);
+  assert.strictEqual(p.truncated, false);
+});
+
+test('ВКонтакте: без заголовка, своё имя источника', () => {
+  const p = buildVkPost({ text: 'Текст новости достаточной длины.', link: 'https://habr.com/1', sourceName: 'Хабр' });
+  assert.ok(p.text.startsWith('Текст новости'));
+  assert.ok(p.text.endsWith('\n\nИсточник: Хабр\nhttps://habr.com/1'));
+});
+
+test('ВКонтакте: ссылка обязательна, пустой текст не пост', () => {
+  assert.throws(() => buildVkPost({ text: 'Текст новости', link: '' }), /источник/);
+  assert.throws(() => buildVkPost({ text: 'Текст новости', link: 'ftp://a.ru' }), /http/);
+  assert.throws(() => buildVkPost({ text: ' \n ', link: 'https://a.ru' }), /пустой/);
+});
+
+test('ВКонтакте: длинный текст обрезается до предела, ссылка остаётся', () => {
+  const p = buildVkPost({ title: 'Заголовок', text: 'Предложение номер раз. '.repeat(400), link: 'https://a.ru/1' });
+  assert.ok(p.truncated);
+  assert.ok(p.text.length <= VK_TEXT_LIMIT);
+  assert.ok(p.text.endsWith('https://a.ru/1'));
+  const small = buildVkPost({ text: 'слово '.repeat(100), link: 'https://a.ru/1' }, { limit: 200 });
+  assert.ok(small.text.length <= 200);
+});
+
+test('площадка из «Настроек»: по умолчанию telegram, неизвестная с ошибкой', () => {
+  assert.strictEqual(platformOf({}), 'telegram');
+  assert.strictEqual(platformOf({ PLATFORM: '' }), 'telegram');
+  assert.strictEqual(platformOf({ PLATFORM: ' VK ' }), 'vk');
+  assert.throws(() => platformOf({ PLATFORM: 'max' }), /неизвестная площадка/);
+});
+
+test('сборка по площадке', () => {
+  const fields = { title: 'A&B', text: 'Текст новости достаточной длины.', link: 'https://a.ru/1' };
+  assert.strictEqual(buildPostFor('telegram', fields).parse_mode, 'HTML');
+  assert.ok(buildPostFor('vk', fields).text.startsWith('A&B\n\n'));
+  assert.throws(() => buildPostFor('max', fields), /неизвестная площадка/);
+});
+
+test('промпт ВКонтакте: все поля подставляются, тот же формат JSON', () => {
+  const tpl = fs.readFileSync(path.join(__dirname, '..', 'prompts', 'vk.md'), 'utf8');
+  const filled = fillPrompt(tpl, { title: 'T', description: 'D', link: 'https://a.ru', maxLength: 900 });
+  assert.ok(!/\{\{\s*\w+\s*\}\}/.test(filled));
+  assert.ok(filled.includes('"relevance"') && filled.includes('"text"'));
+});

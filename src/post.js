@@ -1,4 +1,4 @@
-// Сборка поста для Телеграма из ответа нейросети.
+// Сборка поста из ответа нейросети: Телеграм (разметка HTML) или ВКонтакте (простой текст).
 // Файл без зависимостей: функции можно вставить в узел Code n8n целиком.
 // Разметка HTML (parse_mode: 'HTML'): в ней экранировать нужно только &, < и >.
 'use strict';
@@ -7,6 +7,15 @@
 // подпись к картинке 1024. Считается в единицах UTF-16, как у String.length.
 const TELEGRAM_TEXT_LIMIT = 4096;
 const TELEGRAM_CAPTION_LIMIT = 1024;
+
+// ВКонтакте: метод wall.post, текст в параметре message, разметка не поддерживается.
+// Документация метода: https://dev.vk.com/ru/method/wall.post
+// Предел длины message в описании метода не указан, поэтому здесь свой предел
+// с запасом. Поменять можно через options.limit.
+const VK_TEXT_LIMIT = 4096;
+
+// Площадки, для которых есть сборка поста и промпт prompts/<площадка>.md.
+const PLATFORMS = ['telegram', 'vk'];
 
 function escapeHtml(s) {
   return String(s ?? '')
@@ -71,6 +80,41 @@ function buildPost({ title, text, link, sourceName } = {}, options = {}) {
   return { text: html, parse_mode: 'HTML', visibleLength, truncated: visibleBody !== body };
 }
 
+// Пост для ВКонтакте: простой текст без HTML. Заголовок первой строкой,
+// затем текст и подпись источника, ссылка последней отдельной строкой
+// (ВКонтакте сам делает её кликабельной). Длина считается по всему тексту.
+function buildVkPost({ title, text, link, sourceName } = {}, options = {}) {
+  const url = sourceUrl(link);
+  const limit = options.limit ?? VK_TEXT_LIMIT;
+  const name = String(sourceName || '').trim() || url.hostname.replace(/^www\./, '');
+  const head = String(title || '').replace(/\s+/g, ' ').trim();
+  const body = String(text || '').replace(/\r\n?/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+  if (!body) throw new Error('пустой текст поста');
+
+  const tail = `Источник: ${name}\n${url.href}`;
+  const fixed = (head ? head.length + 2 : 0) + 2 + tail.length;
+  const room = limit - fixed;
+  if (room < 20) throw new Error('не хватает места для текста поста');
+  const visibleBody = truncate(body, room);
+
+  const out = (head ? `${head}\n\n` : '') + `${visibleBody}\n\n${tail}`;
+  return { text: out, visibleLength: out.length, truncated: visibleBody !== body };
+}
+
+// Площадка из поля PLATFORM узла «Настройки»; пусто значит telegram.
+function platformOf(settings = {}) {
+  const p = String((settings && settings.PLATFORM) ?? '').trim().toLowerCase() || 'telegram';
+  if (!PLATFORMS.includes(p)) throw new Error(`неизвестная площадка: ${p}`);
+  return p;
+}
+
+// Сборка поста для выбранной площадки.
+function buildPostFor(platform, fields, options = {}) {
+  if (platform === 'vk') return buildVkPost(fields, options);
+  if (platform === 'telegram') return buildPost(fields, options);
+  throw new Error(`неизвестная площадка: ${platform}`);
+}
+
 // Подставляет поля новости в шаблон промпта: {{title}}, {{description}}, {{link}}, {{maxLength}}.
 // Неизвестная подстановка остаётся видимой, чтобы ошибку в шаблоне было легко заметить.
 function fillPrompt(template, vars = {}) {
@@ -83,9 +127,14 @@ if (typeof module !== 'undefined') {
   module.exports = {
     TELEGRAM_TEXT_LIMIT,
     TELEGRAM_CAPTION_LIMIT,
+    VK_TEXT_LIMIT,
+    PLATFORMS,
     escapeHtml,
     truncate,
     buildPost,
+    buildVkPost,
+    buildPostFor,
+    platformOf,
     fillPrompt,
   };
 }

@@ -52,7 +52,14 @@ test('в конвейерах нет ключей, токенов и досту�
         }
       }
       if (n.type === 'n8n-nodes-base.httpRequest') {
-        assert.strictEqual(n.parameters.authentication, 'predefinedCredentialType', `${f}: ${n.name}`);
+        // Ключ только в учётных данных n8n: готовый тип (OpenAI) или Query Auth для API без своего типа (ВКонтакте).
+        const auth = n.parameters.authentication;
+        assert.ok(['predefinedCredentialType', 'genericCredentialType'].includes(auth), `${f}: ${n.name}: ${auth}`);
+        if (auth === 'genericCredentialType') {
+          assert.strictEqual(n.parameters.genericAuthType, 'httpQueryAuth', `${f}: ${n.name}`);
+        }
+        const body = ((n.parameters.bodyParameters || {}).parameters || []).map((x) => x.name);
+        assert.ok(!body.includes('access_token'), `${f}: ${n.name}: ключ в теле запроса`);
         assert.ok(!n.parameters.sendHeaders && !n.parameters.headerParameters, `${f}: ${n.name}: заголовки вручную`);
         assert.ok(!n.parameters.sendQuery, `${f}: ${n.name}: ключ в адресе`);
       }

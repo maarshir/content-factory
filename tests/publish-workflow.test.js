@@ -33,23 +33,53 @@ function runNode(wf, name, input, nodes) {
 test('публикация: узлы и порядок', () => {
   const wf = load();
   const byName = Object.fromEntries(wf.nodes.map((n) => [n.name, n]));
-  const chain = ['Расписание', 'Настройки', 'Следующий пост', 'Отправка в канал', 'Итог'];
-  const types = ['scheduleTrigger', 'set', 'code', 'telegram', 'code'];
-  chain.forEach((name, i) => assert.strictEqual(byName[name] && byName[name].type, 'n8n-nodes-base.' + types[i], name));
-  for (let i = 0; i + 1 < chain.length; i++) {
-    assert.deepStrictEqual(wf.connections[chain[i]].main[0].map((c) => c.node), [chain[i + 1]], chain[i]);
+  const types = {
+    Расписание: 'scheduleTrigger',
+    Настройки: 'set',
+    'Следующий пост': 'code',
+    Площадка: 'if',
+    'Отправка во ВКонтакте': 'httpRequest',
+    'Отправка в канал': 'telegram',
+    Итог: 'code',
+  };
+  for (const [name, t] of Object.entries(types)) {
+    assert.strictEqual(byName[name] && byName[name].type, 'n8n-nodes-base.' + t, name);
   }
+  const next = (name) => wf.connections[name].main.map((out) => out.map((c) => c.node));
+  assert.deepStrictEqual(next('Расписание'), [['Настройки']]);
+  assert.deepStrictEqual(next('Настройки'), [['Следующий пост']]);
+  assert.deepStrictEqual(next('Следующий пост'), [['Площадка']]);
+  // Первый выход if (условие верно) ведёт во ВКонтакте, второй в Телеграм.
+  assert.deepStrictEqual(next('Площадка'), [['Отправка во ВКонтакте'], ['Отправка в канал']]);
+  assert.deepStrictEqual(next('Отправка во ВКонтакте'), [['Итог']]);
+  assert.deepStrictEqual(next('Отправка в канал'), [['Итог']]);
+  const cond = byName['Площадка'].parameters.conditions.conditions;
+  assert.deepStrictEqual(
+    cond.map((c) => [c.leftValue, c.operator.operation, c.rightValue]),
+    [['={{ $json.platform }}', 'equals', 'vk']]
+  );
   assert.strictEqual(wf.active, false);
   // У бота один вебхук, он в editor.json.
   assert.ok(!wf.nodes.some((n) => n.type === 'n8n-nodes-base.telegramTrigger'));
-  const settings = byName['Настройки'].parameters.assignments.assignments.map((a) => a.name);
-  for (const k of ['TELEGRAM_CHANNEL_ID', 'CF_DB_PATH']) assert.ok(settings.includes(k), k);
+  const settings = Object.fromEntries(byName['Настройки'].parameters.assignments.assignments.map((a) => [a.name, a.value]));
+  for (const k of ['TELEGRAM_CHANNEL_ID', 'CF_DB_PATH', 'PLATFORM', 'VK_GROUP_ID']) assert.ok(k in settings, k);
+  assert.strictEqual(settings.PLATFORM, 'telegram');
   const send = byName['Отправка в канал'];
   assert.match(send.parameters.chatId, /TELEGRAM_CHANNEL_ID/);
   assert.strictEqual(send.parameters.text, '={{ $json.text }}');
   assert.strictEqual(send.parameters.additionalFields.parse_mode, 'HTML');
-  assert.strictEqual(send.onError, 'continueRegularOutput');
-  assert.ok(!send.retryOnFail, 'повтор отправки может дать пост дважды');
+  for (const name of ['Отправка в канал', 'Отправка во ВКонтакте']) {
+    assert.strictEqual(byName[name].onError, 'continueRegularOutput', name);
+    assert.ok(!byName[name].retryOnFail, `${name}: повтор отправки может дать пост дважды`);
+  }
+  const vk = byName['Отправка во ВКонтакте'].parameters;
+  assert.strictEqual(vk.method, 'POST');
+  assert.strictEqual(vk.url, 'https://api.vk.com/method/wall.post');
+  const body = Object.fromEntries(vk.bodyParameters.parameters.map((p) => [p.name, p.value]));
+  assert.strictEqual(body.owner_id, '={{ $json.ownerId }}');
+  assert.strictEqual(body.from_group, '1');
+  assert.strictEqual(body.message, '={{ $json.text }}');
+  assert.match(body.v, /^5\.\d+$/);
 });
 
 // Тихие часы зависят от времени запуска теста, поэтому в узел подставляется настройка без них.
@@ -86,11 +116,17 @@ test('публикация: пост уходит в канал и помеча�
   nodes['Следующий пост'] = await runNode(wf, 'Следующий пост', [], nodes);
   assert.strictEqual(nodes['Следующий пост'].length, 1);
   const post = nodes['Следующий пост'][0].json;
-  assert.deepStrictEqual(post, { id: log.get('https://example.com/p1').id, link: 'https://example.com/p1', text: '<b>Пост 1</b>' });
+  assert.deepStrictEqual(post, {
+    id: log.get('https://example.com/p1').id,
+    link: 'https://example.com/p1',
+    text: '<b>Пост 1</b>',
+    platform: 'telegram',
+    ownerId: '',
+  });
 
   // Синтетический ответ API Телеграма.
   const out = await runNode(wf, 'Итог', j([{ ok: true, result: { message_id: 42 } }]), nodes);
-  assert.deepStrictEqual(out[0].json, { id: post.id, status: 'published', messageId: '42', error: '' });
+  assert.deepStrictEqual(out[0].json, { id: post.id, platform: 'telegram', status: 'published', messageId: '42', error: '' });
   const row = log.get('https://example.com/p1');
   assert.strictEqual(row.status, 'published');
   assert.strictEqual(row.message_id, '42');
@@ -125,4 +161,75 @@ test('публикация: пустая очередь завершает за�
   const nodes = { Настройки: j([{ CF_DB_PATH: path.join(tmp, 'log.sqlite') }]) };
   assert.deepStrictEqual(await runNode(wf, 'Следующий пост', [], nodes), []);
   fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+// Синтетический пост из журнала в разметке Телеграма, как его собирает конвейер сбора.
+function setupVk(group = '123456') {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'cf-'));
+  const db = path.join(tmp, 'log.sqlite');
+  const conn = new DatabaseSync(db);
+  const log = createLog(conn);
+  log.init();
+  const link = 'https://example.com/vk1';
+  log.collected({ link, title: 'Пост ВК' });
+  log.drafted(link, '<b>Пост &amp; ВК</b>\n\nТекст.\n\nИсточник: <a href="https://example.com/vk1">example.com</a>');
+  log.queued(link);
+  const done = () => {
+    conn.close();
+    fs.rmSync(tmp, { recursive: true, force: true });
+  };
+  const nodes = { Настройки: j([{ CF_DB_PATH: db, PLATFORM: 'vk', VK_GROUP_ID: group }]) };
+  return { log, done, nodes, link };
+}
+
+test('публикация во ВКонтакте: простой текст на стену сообщества, номер записи в журнал', { skip }, async () => {
+  const wf = withoutQuiet(load());
+  const { log, done, nodes, link } = setupVk();
+  nodes['Следующий пост'] = await runNode(wf, 'Следующий пост', [], nodes);
+  const post = nodes['Следующий пост'][0].json;
+  assert.strictEqual(post.platform, 'vk');
+  assert.strictEqual(post.ownerId, '-123456');
+  assert.strictEqual(post.text, 'Пост & ВК\n\nТекст.\n\nИсточник: example.com\nhttps://example.com/vk1');
+  assert.doesNotMatch(post.text, /<|&amp;/);
+
+  // Синтетический ответ wall.post.
+  const out = await runNode(wf, 'Итог', j([{ response: { post_id: 77 } }]), nodes);
+  assert.deepStrictEqual(out[0].json, { id: post.id, platform: 'vk', status: 'published', messageId: '77', error: '' });
+  const row = log.get(link);
+  assert.strictEqual(row.status, 'published');
+  assert.strictEqual(row.message_id, '77');
+  done();
+});
+
+test('публикация во ВКонтакте: ошибка API в журнал, пост остаётся в очереди', { skip }, async () => {
+  const wf = withoutQuiet(load());
+  const { log, done, nodes, link } = setupVk();
+  nodes['Следующий пост'] = await runNode(wf, 'Следующий пост', [], nodes);
+  // Синтетический ответ с ошибкой в формате API ВКонтакте.
+  const out = await runNode(wf, 'Итог', j([{ error: { error_code: 15, error_msg: 'Access denied' } }]), nodes);
+  assert.strictEqual(out[0].json.status, 'queued');
+  assert.strictEqual(out[0].json.attempts, 1);
+  assert.strictEqual(log.get(link).reason, 'ошибка ВКонтакте: 15: Access denied');
+  // Сбой самого запроса (узел HTTP Request с continueRegularOutput).
+  await runNode(wf, 'Итог', j([{ error: { message: 'getaddrinfo ENOTFOUND api.vk.com' } }]), nodes);
+  assert.strictEqual(log.get(link).reason, 'ошибка ВКонтакте: getaddrinfo ENOTFOUND api.vk.com');
+  // Ответ без номера записи тоже ошибка.
+  await runNode(wf, 'Итог', j([{ response: {} }]), nodes);
+  assert.match(log.get(link).reason, /нет номера записи/);
+  assert.strictEqual(log.get(link).status, 'queued');
+  done();
+});
+
+test('публикация во ВКонтакте: без номера сообщества запуск падает с понятной ошибкой', { skip }, async () => {
+  const wf = withoutQuiet(load());
+  for (const group of ['', 'club123']) {
+    const { done, nodes } = setupVk(group);
+    await assert.rejects(runNode(wf, 'Следующий пост', [], nodes), /VK_GROUP_ID/);
+    done();
+  }
+  // Номер с минусом тоже принимается.
+  const { done, nodes } = setupVk('-42');
+  const out = await runNode(wf, 'Следующий пост', [], nodes);
+  assert.strictEqual(out[0].json.ownerId, '-42');
+  done();
 });

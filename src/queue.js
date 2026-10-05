@@ -82,21 +82,22 @@ function createQueue(db, options = {}) {
     return { item, wait: item ? null : 'empty' };
   }
 
-  // Телеграм не принял пост: он остаётся в очереди, в reason ошибка, счётчик растёт.
-  function failed(id, error) {
+  // Площадка не приняла пост: он остаётся в очереди, в reason ошибка, счётчик растёт.
+  // platform: telegram (по умолчанию) или vk, от неё зависит подпись ошибки.
+  function failed(id, error, platform = 'telegram') {
     const old = byId(id);
     if (!old) throw new Error(`нет в журнале: ${id}`);
     if (old.status !== 'queued') throw new Error(`ошибка отправки только для queued, сейчас ${old.status}`);
     const text = String(error ?? '').trim().slice(0, 300) || 'неизвестная ошибка';
     db.prepare('UPDATE items SET reason = ?, attempts = attempts + 1, updated_at = ? WHERE id = ?').run(
-      'ошибка Телеграма: ' + text,
+      (platform === 'vk' ? 'ошибка ВКонтакте: ' : 'ошибка Телеграма: ') + text,
       now(),
       old.id
     );
     return byId(old.id);
   }
 
-  // Телеграм принял пост: статус published и номер сообщения в канале, ошибка стирается.
+  // Площадка приняла пост: статус published и номер сообщения в канале (у ВКонтакте номер записи на стене), ошибка стирается.
   // Те же правила, что у log.published, только по номеру записи из узла «Следующий пост».
   function published(id, messageId) {
     if (messageId === undefined || messageId === null || String(messageId).trim() === '') {

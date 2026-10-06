@@ -46,6 +46,8 @@ try {
         link: news.link,
         relevance: r.relevance,
         text: post.text,
+        // Номер повтора отправки редактору, считает узел «Повтор черновика».
+        attempt: 0,
         // Редактору видна оценка нейросети, в канал она не попадает.
         editorText: `Оценка нейросети: ${r.relevance}/10${post.truncated ? ', текст обрезан' : ''}\n\n${post.text}`,
       },

@@ -26,8 +26,8 @@ try {
   if (!queue.init()) return [];
   const { item } = queue.next(CONFIG);
   if (!item) return [];
-  // Черновики собраны для Телеграма с разметкой HTML, ВКонтакте её не понимает.
-  const text = platform === 'vk' ? plainLib.htmlToPlain(item.post) : item.post;
+  // Черновик собран под площадку сбора; если она другая, текст переводится (src/plain.js).
+  const text = plainLib.textFor(platform, item.post);
   return [{ json: { id: item.id, link: item.link, text, platform, ownerId } }];
 } finally {
   db.close();

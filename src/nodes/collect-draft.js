@@ -2,6 +2,7 @@
 // Отказ модели, низкая оценка и ошибка запроса пишутся в журнал с причиной.
 // Пересказ сверяется с описанием из ленты (overlap.js): при большой доле дословных
 // совпадений редактор видит пометку над черновиком.
+// Пост собирается под площадку PLATFORM из «Настроек»: telegram (HTML) или vk (простой текст).
 // @include src/filter.js as filterLib
 // @include src/log.js as logLib
 // @include src/parse.js as parseLib
@@ -13,6 +14,8 @@ const settings = $('Настройки').first().json;
 const minRelevance = Number(settings.MIN_RELEVANCE ?? 6);
 const overlapWords = Number(settings.OVERLAP_WORDS) || overlapLib.DEFAULT_WORDS;
 const overlapMax = settings.OVERLAP_MAX ?? overlapLib.DEFAULT_MAX;
+const platform = postLib.platformOf(settings);
+const limit = platform === 'vk' ? postLib.VK_TEXT_LIMIT : postLib.TELEGRAM_TEXT_LIMIT;
 
 const db = new DatabaseSync(settings.CF_DB_PATH);
 try {
@@ -36,9 +39,10 @@ try {
     let post;
     try {
       // Запас 200 знаков под строки с оценкой и пометкой о совпадениях в сообщении редактору.
-      post = postLib.buildPost(
+      post = postLib.buildPostFor(
+        platform,
         { title: news.title, text: r.text, link: news.link, sourceName: news.source },
-        { limit: postLib.TELEGRAM_TEXT_LIMIT - 200 }
+        { limit: limit - 200 }
       );
     } catch (e) {
       log.rejected(news.link, 'пост не собран: ' + e.message, { relevance: r.relevance });
@@ -47,6 +51,8 @@ try {
     log.drafted(news.link, post.text, { relevance: r.relevance });
     const same = overlapLib.overlap(r.text, news.description, { words: overlapWords });
     const note = overlapLib.overlapNote(same, { max: overlapMax });
+    // Бот редактора в Телеграме с разметкой HTML: простой текст для ВКонтакте экранируется.
+    const shown = platform === 'vk' ? postLib.escapeHtml(post.text) : post.text;
     const head = `Оценка нейросети: ${r.relevance}/10${post.truncated ? ', текст обрезан' : ''}`;
     out.push({
       json: {
@@ -58,7 +64,7 @@ try {
         attempt: 0,
         overlap: Math.round(same.ratio * 100) / 100,
         // Редактору видны оценка нейросети и пометка о совпадениях, в канал они не попадают.
-        editorText: `${head}${note ? '\n' + note : ''}\n\n${post.text}`,
+        editorText: `${head}${note ? '\n' + note : ''}\n\n${shown}`,
       },
     });
   });

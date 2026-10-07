@@ -214,6 +214,39 @@ test('сбор: ошибка запроса к нейросети записыв
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
+test('сбор: пометка редактору при дословных совпадениях с описанием', { skip }, async () => {
+  const wf = load('collect.json');
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'cf-'));
+  const db = path.join(tmp, 'log.sqlite');
+  const nodes = { Настройки: j([{ CF_DB_PATH: db, OVERLAP_WORDS: 5, OVERLAP_MAX: 0.2 }]), Ленты: j([{ name: 'Пример' }]) };
+  // Синтетическая запись ленты с длинным описанием.
+  const description =
+    'Компания выложила в открытый доступ языковую модель для русского языка. ' +
+    'Веса модели можно скачать бесплатно, код обучения опубликован на Гитхабе.';
+  const rss = j([
+    { title: 'Открыта модель для русского языка', link: 'https://example.com/m1', contentSnippet: description },
+    { title: 'Нейросеть для русского языка в открытом доступе', link: 'https://example.com/m2', contentSnippet: description },
+  ]);
+  nodes['Ленты'] = j(rss.map(() => ({ name: 'Пример' })));
+  nodes['Отбор'] = await runNode(wf, 'Отбор', rss, nodes);
+  assert.strictEqual(nodes['Отбор'].length, 2);
+  nodes['Промпт'] = await runNode(wf, 'Промпт', nodes['Отбор'], nodes);
+  const answer = (o) => ({ choices: [{ message: { content: JSON.stringify(o) } }] });
+  const drafts = await runNode(wf, 'Разбор и пост', j([
+    answer({ relevance: 8, text: 'Веса модели можно скачать бесплатно, код обучения опубликован на Гитхабе.' }),
+    answer({ relevance: 8, text: 'Открыта модель для русского: веса бесплатны, обучающий код лежит на Гитхабе.' }),
+  ]), nodes);
+  assert.strictEqual(drafts.length, 2);
+  const [copied, own] = drafts.map((d) => d.json);
+  assert.strictEqual(copied.overlap, 1);
+  assert.match(copied.editorText, /^Оценка нейросети: 8\/10\nДословно из источника: 100% \(порог 20%\), например «веса модели[^\n]*»\n\n<b>/);
+  // В канал пометка не попадает.
+  assert.doesNotMatch(copied.text, /Дословно/);
+  assert.strictEqual(own.overlap, 0);
+  assert.match(own.editorText, /^Оценка нейросети: 8\/10\n\n<b>/);
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
 test('бот редактора: узлы, ветки и кнопки', () => {
   const wf = load('editor.json');
   const byName = Object.fromEntries(wf.nodes.map((n) => [n.name, n]));

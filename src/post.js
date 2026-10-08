@@ -1,4 +1,4 @@
-// Сборка поста из ответа нейросети: Телеграм (разметка HTML) или ВКонтакте (простой текст).
+// Сборка поста из ответа нейросети: Телеграм и MAX (разметка HTML) или ВКонтакте (простой текст).
 // Файл без зависимостей: функции можно вставить в узел Code n8n целиком.
 // Разметка HTML (parse_mode: 'HTML'): в ней экранировать нужно только &, < и >.
 'use strict';
@@ -14,8 +14,16 @@ const TELEGRAM_CAPTION_LIMIT = 1024;
 // с запасом. Поменять можно через options.limit.
 const VK_TEXT_LIMIT = 4096;
 
+// MAX: метод POST /messages, текст до 4000 знаков, разметка по полю format
+// (markdown или html). Документация: https://dev.max.ru/docs-api/methods/POST/messages
+// Теги HTML: https://dev.max.ru/docs-api/use-cases/sending-messages/text-formatting
+// Учитывается ли разметка в пределе, не сказано, поэтому длина считается по всему
+// тексту вместе с тегами.
+const MAX_TEXT_LIMIT = 4000;
+const MAX_FORMAT = 'html';
+
 // Площадки, для которых есть сборка поста и промпт prompts/<площадка>.md.
-const PLATFORMS = ['telegram', 'vk'];
+const PLATFORMS = ['telegram', 'vk', 'max'];
 
 function escapeHtml(s) {
   return String(s ?? '')
@@ -101,6 +109,30 @@ function buildVkPost({ title, text, link, sourceName } = {}, options = {}) {
   return { text: out, visibleLength: out.length, truncated: visibleBody !== body };
 }
 
+// Пост для MAX: та же разметка HTML, что у Телеграма (<b> и <a> есть в обоих),
+// заголовок жирным, текст, ссылка на источник отдельной строкой. Отправляется
+// с format: 'html'. Длина считается по всему тексту с тегами и сущностями.
+function buildMaxPost({ title, text, link, sourceName } = {}, options = {}) {
+  const url = sourceUrl(link);
+  const limit = options.limit ?? MAX_TEXT_LIMIT;
+  const name = String(sourceName || '').trim() || url.hostname.replace(/^www\./, '');
+  const head = String(title || '').replace(/\s+/g, ' ').trim();
+  const body = String(text || '').replace(/\r\n?/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+  if (!body) throw new Error('пустой текст поста');
+
+  const headHtml = head ? `<b>${escapeHtml(head)}</b>\n\n` : '';
+  const tail = `\n\nИсточник: <a href="${escapeAttr(url.href)}">${escapeHtml(name)}</a>`;
+  const room = limit - headHtml.length - tail.length;
+  if (room < 20) throw new Error('не хватает места для текста поста');
+  // Экранирование удлиняет текст, поэтому обрезка повторяется, пока он не влезет.
+  let visibleBody = truncate(body, room);
+  while (escapeHtml(visibleBody).length > room) {
+    visibleBody = truncate(body, visibleBody.length - (escapeHtml(visibleBody).length - room));
+  }
+  const out = headHtml + escapeHtml(visibleBody) + tail;
+  return { text: out, format: MAX_FORMAT, visibleLength: out.length, truncated: visibleBody !== body };
+}
+
 // Площадка из поля PLATFORM узла «Настройки»; пусто значит telegram.
 function platformOf(settings = {}) {
   const p = String((settings && settings.PLATFORM) ?? '').trim().toLowerCase() || 'telegram';
@@ -111,6 +143,7 @@ function platformOf(settings = {}) {
 // Сборка поста для выбранной площадки.
 function buildPostFor(platform, fields, options = {}) {
   if (platform === 'vk') return buildVkPost(fields, options);
+  if (platform === 'max') return buildMaxPost(fields, options);
   if (platform === 'telegram') return buildPost(fields, options);
   throw new Error(`неизвестная площадка: ${platform}`);
 }
@@ -128,11 +161,14 @@ if (typeof module !== 'undefined') {
     TELEGRAM_TEXT_LIMIT,
     TELEGRAM_CAPTION_LIMIT,
     VK_TEXT_LIMIT,
+    MAX_TEXT_LIMIT,
+    MAX_FORMAT,
     PLATFORMS,
     escapeHtml,
     truncate,
     buildPost,
     buildVkPost,
+    buildMaxPost,
     buildPostFor,
     platformOf,
     fillPrompt,

@@ -23,19 +23,61 @@ function tokens(s) {
 function normalizeUrl(url) {
   const raw = String(url || '').trim();
   if (!raw) return '';
-  let u;
-  try {
-    u = new URL(raw);
-  } catch {
-    return raw.toLowerCase();
-  }
-  const params = [...u.searchParams.entries()]
+  const u = splitUrl(raw);
+  if (!u) return raw.toLowerCase();
+  const params = u.params
     .filter(([k]) => !TRACKING.test(k))
     .sort(([a], [b]) => a.localeCompare(b));
-  const query = params.length ? '?' + new URLSearchParams(params).toString() : '';
+  const query = params.length ? '?' + params.map(([k, v]) => formEncode(k) + '=' + formEncode(v)).join('&') : '';
   const host = u.hostname.toLowerCase().replace(/^www\./, '');
   const p = u.pathname.replace(/\/+$/, '');
   return host + p + query;
+}
+
+// Кодирование как у URLSearchParams.toString(): пробел как +, остальное через %.
+function formEncode(s) {
+  return encodeURIComponent(s)
+    .replace(/[!'()~]/g, (c) => '%' + c.charCodeAt(0).toString(16).toUpperCase())
+    .replace(/%20/g, '+');
+}
+
+function formDecode(s) {
+  const t = s.replace(/\+/g, ' ');
+  try {
+    return decodeURIComponent(t);
+  } catch {
+    return t;
+  }
+}
+
+// Части ссылки: { hostname, pathname, params: [[ключ, значение]] } или null.
+// В узлах Code n8n 2.x (отдельный процесс task runner) глобального URL нет,
+// тогда ссылка разбирается регулярным выражением.
+function splitUrl(raw) {
+  if (typeof URL === 'function') {
+    let u;
+    try {
+      u = new URL(raw);
+    } catch {
+      return null;
+    }
+    return { hostname: u.hostname, pathname: u.pathname, params: [...u.searchParams.entries()] };
+  }
+  const m = /^[a-z][a-z0-9+.-]*:\/\/([^/?#\s]+)([^?#\s]*)(\?[^#\s]*)?(#\S*)?$/i.exec(raw);
+  if (!m) return null;
+  const hostname = m[1].replace(/^[^@]*@/, '').replace(/:\d*$/, '');
+  if (!hostname) return null;
+  const params = (m[3] || '')
+    .slice(1)
+    .split('&')
+    .filter(Boolean)
+    .map((pair) => {
+      const i = pair.indexOf('=');
+      return i < 0 ? [formDecode(pair), ''] : [formDecode(pair.slice(0, i)), formDecode(pair.slice(i + 1))];
+    });
+  // Как URL: буквы не из ASCII в пути кодируются через %.
+  const pathname = (m[2] || '/').replace(/[^\x00-\x7f]+/g, (c) => encodeURIComponent(c));
+  return { hostname, pathname, params };
 }
 
 // Ключевое слово из нескольких слов ищется как фраза, каждое слово как начало

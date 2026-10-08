@@ -16,10 +16,15 @@ const { buildNodeCode } = require('./build-workflows.js');
 
 const NOTE = /^Код: (src\/nodes\/[\w.-]+\.js)$/m;
 
+// Только конвейеры этого репозитория: в том же n8n могут быть другие проекты
+// с такими же заметками у узлов (например, job-radar).
+const PREFIX = 'content-factory:';
+
 function updateWorkflows(list) {
   const out = [];
   const report = [];
   for (const wf of list) {
+    if (!String(wf.name || '').startsWith(PREFIX)) continue;
     let dirty = false;
     for (const node of wf.nodes || []) {
       if (node.type !== 'n8n-nodes-base.code') continue;

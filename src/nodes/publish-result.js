@@ -1,5 +1,5 @@
 // Узел «Итог»: ответ площадки -> журнал. Есть номер сообщения: пост опубликован.
-// Ошибка Телеграма или ВКонтакте пишется в журнал, пост остаётся в очереди до следующего запуска.
+// Ошибка Телеграма, ВКонтакте или MAX пишется в журнал, пост остаётся в очереди до следующего запуска.
 // Журнал уже подготовлен узлом «Следующий пост» (queue.init).
 // @include src/queue.js as queueLib
 
@@ -7,7 +7,7 @@ const { DatabaseSync } = require('node:sqlite');
 const settings = $('Настройки').first().json;
 const post = $('Следующий пост').first().json;
 const res = $input.first().json || {};
-const platform = post.platform === 'vk' ? 'vk' : 'telegram';
+const platform = ['vk', 'max'].includes(post.platform) ? post.platform : 'telegram';
 
 const errorText = (e) => (e && typeof e === 'object' ? e.description || e.error_msg || e.message || JSON.stringify(e) : e);
 
@@ -21,6 +21,17 @@ if (platform === 'vk') {
     error = `${res.error.error_code}: ${res.error.error_msg || 'без описания'}`;
   } else {
     error = errorText(res.error) || 'нет номера записи в ответе ВКонтакте';
+  }
+} else if (platform === 'max') {
+  // POST /messages: { message: { body: { mid } } } (https://dev.max.ru/docs-api/methods/POST/messages,
+  // номер сообщения mid в теле сообщения). Узел отдаёт ответ с ошибкой как есть (neverError):
+  // { code, message }. Сбой самого запроса: { error: { message } }.
+  const body = res.message && typeof res.message === 'object' ? res.message.body : null;
+  messageId = body && body.mid;
+  if (res.code != null && res.code !== '') {
+    error = `${res.code}: ${typeof res.message === 'string' && res.message ? res.message : 'без описания'}`;
+  } else {
+    error = errorText(res.error) || 'нет номера сообщения в ответе MAX';
   }
 } else {
   // Узел Telegram отдаёт ответ API ({ ok, result: { message_id } }), при ошибке { error }.

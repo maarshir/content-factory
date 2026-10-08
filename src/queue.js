@@ -83,14 +83,15 @@ function createQueue(db, options = {}) {
   }
 
   // Площадка не приняла пост: он остаётся в очереди, в reason ошибка, счётчик растёт.
-  // platform: telegram (по умолчанию) или vk, от неё зависит подпись ошибки.
+  // platform: telegram (по умолчанию), vk или max, от неё зависит подпись ошибки.
+  const ERROR_PREFIX = { telegram: 'ошибка Телеграма: ', vk: 'ошибка ВКонтакте: ', max: 'ошибка MAX: ' };
   function failed(id, error, platform = 'telegram') {
     const old = byId(id);
     if (!old) throw new Error(`нет в журнале: ${id}`);
     if (old.status !== 'queued') throw new Error(`ошибка отправки только для queued, сейчас ${old.status}`);
     const text = String(error ?? '').trim().slice(0, 300) || 'неизвестная ошибка';
     db.prepare('UPDATE items SET reason = ?, attempts = attempts + 1, updated_at = ? WHERE id = ?').run(
-      (platform === 'vk' ? 'ошибка ВКонтакте: ' : 'ошибка Телеграма: ') + text,
+      (ERROR_PREFIX[platform] || ERROR_PREFIX.telegram) + text,
       now(),
       old.id
     );

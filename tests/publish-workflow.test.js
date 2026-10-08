@@ -39,6 +39,8 @@ test('публикация: узлы и порядок', () => {
     'Следующий пост': 'code',
     Площадка: 'if',
     'Отправка во ВКонтакте': 'httpRequest',
+    'MAX или Телеграм': 'if',
+    'Отправка в MAX': 'httpRequest',
     'Отправка в канал': 'telegram',
     Итог: 'code',
   };
@@ -49,26 +51,26 @@ test('публикация: узлы и порядок', () => {
   assert.deepStrictEqual(next('Расписание'), [['Настройки']]);
   assert.deepStrictEqual(next('Настройки'), [['Следующий пост']]);
   assert.deepStrictEqual(next('Следующий пост'), [['Площадка']]);
-  // Первый выход if (условие верно) ведёт во ВКонтакте, второй в Телеграм.
-  assert.deepStrictEqual(next('Площадка'), [['Отправка во ВКонтакте'], ['Отправка в канал']]);
+  // Первый выход if (условие верно) ведёт во ВКонтакте, второй к выбору между MAX и Телеграмом.
+  assert.deepStrictEqual(next('Площадка'), [['Отправка во ВКонтакте'], ['MAX или Телеграм']]);
+  assert.deepStrictEqual(next('MAX или Телеграм'), [['Отправка в MAX'], ['Отправка в канал']]);
   assert.deepStrictEqual(next('Отправка во ВКонтакте'), [['Итог']]);
+  assert.deepStrictEqual(next('Отправка в MAX'), [['Итог']]);
   assert.deepStrictEqual(next('Отправка в канал'), [['Итог']]);
-  const cond = byName['Площадка'].parameters.conditions.conditions;
-  assert.deepStrictEqual(
-    cond.map((c) => [c.leftValue, c.operator.operation, c.rightValue]),
-    [['={{ $json.platform }}', 'equals', 'vk']]
-  );
+  const cond = (name) => byName[name].parameters.conditions.conditions.map((c) => [c.leftValue, c.operator.operation, c.rightValue]);
+  assert.deepStrictEqual(cond('Площадка'), [['={{ $json.platform }}', 'equals', 'vk']]);
+  assert.deepStrictEqual(cond('MAX или Телеграм'), [['={{ $json.platform }}', 'equals', 'max']]);
   assert.strictEqual(wf.active, false);
   // У бота один вебхук, он в editor.json.
   assert.ok(!wf.nodes.some((n) => n.type === 'n8n-nodes-base.telegramTrigger'));
   const settings = Object.fromEntries(byName['Настройки'].parameters.assignments.assignments.map((a) => [a.name, a.value]));
-  for (const k of ['TELEGRAM_CHANNEL_ID', 'CF_DB_PATH', 'PLATFORM', 'VK_GROUP_ID']) assert.ok(k in settings, k);
+  for (const k of ['TELEGRAM_CHANNEL_ID', 'CF_DB_PATH', 'PLATFORM', 'VK_GROUP_ID', 'MAX_CHAT_ID']) assert.ok(k in settings, k);
   assert.strictEqual(settings.PLATFORM, 'telegram');
   const send = byName['Отправка в канал'];
   assert.match(send.parameters.chatId, /TELEGRAM_CHANNEL_ID/);
   assert.strictEqual(send.parameters.text, '={{ $json.text }}');
   assert.strictEqual(send.parameters.additionalFields.parse_mode, 'HTML');
-  for (const name of ['Отправка в канал', 'Отправка во ВКонтакте']) {
+  for (const name of ['Отправка в канал', 'Отправка во ВКонтакте', 'Отправка в MAX']) {
     assert.strictEqual(byName[name].onError, 'continueRegularOutput', name);
     assert.ok(!byName[name].retryOnFail, `${name}: повтор отправки может дать пост дважды`);
   }
@@ -80,6 +82,24 @@ test('публикация: узлы и порядок', () => {
   assert.strictEqual(body.from_group, '1');
   assert.strictEqual(body.message, '={{ $json.text }}');
   assert.match(body.v, /^5\.\d+$/);
+});
+
+test('публикация: узел «Отправка в MAX» берёт ключ только из учётных данных', () => {
+  const wf = load();
+  const node = wf.nodes.find((n) => n.name === 'Отправка в MAX');
+  const p = node.parameters;
+  assert.strictEqual(p.method, 'POST');
+  assert.strictEqual(p.url, '=https://platform-api2.max.ru/messages?chat_id={{ $json.chatId }}');
+  // Ключ в заголовке Authorization через учётные данные Header Auth, в адресе MAX его не принимает.
+  assert.strictEqual(p.authentication, 'genericCredentialType');
+  assert.strictEqual(p.genericAuthType, 'httpHeaderAuth');
+  assert.ok(!p.sendHeaders && !p.headerParameters, 'заголовки только через учётные данные');
+  assert.doesNotMatch(p.url, /token|key|authorization/i);
+  assert.strictEqual(p.jsonBody, '={{ JSON.stringify({ text: $json.text, format: $json.format }) }}');
+  assert.doesNotMatch(p.jsonBody, /token|key|authorization/i);
+  assert.ok(!('credentials' in node) || !JSON.stringify(node.credentials).match(/[A-Za-z0-9_-]{30,}/));
+  // Ответ с ошибкой API нужен в «Итоге» целиком, с кодом и текстом.
+  assert.strictEqual(p.options.response.response.neverError, true);
 });
 
 // Тихие часы зависят от времени запуска теста, поэтому в узел подставляется настройка без них.
@@ -232,4 +252,69 @@ test('публикация во ВКонтакте: без номера сооб
   const out = await runNode(wf, 'Следующий пост', [], nodes);
   assert.strictEqual(out[0].json.ownerId, '-42');
   done();
+});
+
+// Синтетический черновик под MAX (HTML, как у Телеграма).
+function setupMax(chat = '-1001234') {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'cf-'));
+  const db = path.join(tmp, 'log.sqlite');
+  const conn = new DatabaseSync(db);
+  const log = createLog(conn);
+  log.init();
+  const link = 'https://example.com/max1';
+  log.collected({ link, title: 'Пост MAX' });
+  log.drafted(link, '<b>Пост MAX</b>\n\nТекст.\n\nИсточник: <a href="https://example.com/max1">example.com</a>');
+  log.queued(link);
+  const done = () => {
+    conn.close();
+    fs.rmSync(tmp, { recursive: true, force: true });
+  };
+  const nodes = { Настройки: j([{ CF_DB_PATH: db, PLATFORM: 'max', MAX_CHAT_ID: chat }]) };
+  return { log, done, nodes, link };
+}
+
+test('публикация в MAX: HTML в канал, номер сообщения в журнал', { skip }, async () => {
+  const wf = withoutQuiet(load());
+  const { log, done, nodes, link } = setupMax();
+  nodes['Следующий пост'] = await runNode(wf, 'Следующий пост', [], nodes);
+  const post = nodes['Следующий пост'][0].json;
+  assert.strictEqual(post.platform, 'max');
+  assert.strictEqual(post.chatId, '-1001234');
+  assert.strictEqual(post.format, 'html');
+  assert.strictEqual(post.text, '<b>Пост MAX</b>\n\nТекст.\n\nИсточник: <a href="https://example.com/max1">example.com</a>');
+
+  // Синтетический ответ POST /messages.
+  const out = await runNode(wf, 'Итог', j([{ message: { body: { mid: 'mid.abc123', text: post.text } } }]), nodes);
+  assert.deepStrictEqual(out[0].json, { id: post.id, platform: 'max', status: 'published', messageId: 'mid.abc123', error: '' });
+  assert.strictEqual(log.get(link).status, 'published');
+  assert.strictEqual(log.get(link).message_id, 'mid.abc123');
+  done();
+});
+
+test('публикация в MAX: ошибка в журнал «ошибка MAX: код: текст», пост остаётся в очереди', { skip }, async () => {
+  const wf = withoutQuiet(load());
+  const { log, done, nodes, link } = setupMax();
+  nodes['Следующий пост'] = await runNode(wf, 'Следующий пост', [], nodes);
+  // Синтетический ответ с ошибкой.
+  const out = await runNode(wf, 'Итог', j([{ code: 'verify.token', message: 'Invalid access_token' }]), nodes);
+  assert.strictEqual(out[0].json.status, 'queued');
+  assert.strictEqual(out[0].json.attempts, 1);
+  assert.strictEqual(log.get(link).reason, 'ошибка MAX: verify.token: Invalid access_token');
+  // Сбой самого запроса.
+  await runNode(wf, 'Итог', j([{ error: { message: 'getaddrinfo ENOTFOUND platform-api2.max.ru' } }]), nodes);
+  assert.strictEqual(log.get(link).reason, 'ошибка MAX: getaddrinfo ENOTFOUND platform-api2.max.ru');
+  // Ответ без номера сообщения тоже ошибка.
+  await runNode(wf, 'Итог', j([{ message: { body: {} } }]), nodes);
+  assert.match(log.get(link).reason, /нет номера сообщения в ответе MAX/);
+  assert.strictEqual(log.get(link).status, 'queued');
+  done();
+});
+
+test('публикация в MAX: без номера канала запуск падает с понятной ошибкой', { skip }, async () => {
+  const wf = withoutQuiet(load());
+  for (const chat of ['', '@channel']) {
+    const { done, nodes } = setupMax(chat);
+    await assert.rejects(runNode(wf, 'Следующий пост', [], nodes), /MAX_CHAT_ID/);
+    done();
+  }
 });

@@ -111,10 +111,10 @@ test('сбор под MAX: промпт max.md, пост в HTML, редакто
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
-test('публикация: площадка без отправки останавливает запуск с понятной ошибкой', { skip }, async () => {
+test('публикация в MAX: без MAX_CHAT_ID запуск останавливается с понятной ошибкой', { skip }, async () => {
   const wf = load('publish.json');
   await assert.rejects(
     runNode(wf, 'Следующий пост', [], { Настройки: j([{ CF_DB_PATH: ':memory:', PLATFORM: 'max' }]) }),
-    /пока не поддерживается/
+    /MAX_CHAT_ID/
   );
 });

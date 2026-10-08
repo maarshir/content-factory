@@ -2,7 +2,7 @@
 // Отказ модели, низкая оценка и ошибка запроса пишутся в журнал с причиной.
 // Пересказ сверяется с описанием из ленты (overlap.js): при большой доле дословных
 // совпадений редактор видит пометку над черновиком.
-// Пост собирается под площадку PLATFORM из «Настроек»: telegram (HTML) или vk (простой текст).
+// Пост собирается под площадку PLATFORM из «Настроек»: telegram и max (HTML) или vk (простой текст).
 // @include src/filter.js as filterLib
 // @include src/log.js as logLib
 // @include src/parse.js as parseLib
@@ -15,7 +15,7 @@ const minRelevance = Number(settings.MIN_RELEVANCE ?? 6);
 const overlapWords = Number(settings.OVERLAP_WORDS) || overlapLib.DEFAULT_WORDS;
 const overlapMax = settings.OVERLAP_MAX ?? overlapLib.DEFAULT_MAX;
 const platform = postLib.platformOf(settings);
-const limit = platform === 'vk' ? postLib.VK_TEXT_LIMIT : postLib.TELEGRAM_TEXT_LIMIT;
+const limit = { telegram: postLib.TELEGRAM_TEXT_LIMIT, vk: postLib.VK_TEXT_LIMIT, max: postLib.MAX_TEXT_LIMIT }[platform];
 
 const db = new DatabaseSync(settings.CF_DB_PATH);
 try {
@@ -51,7 +51,8 @@ try {
     log.drafted(news.link, post.text, { relevance: r.relevance });
     const same = overlapLib.overlap(r.text, news.description, { words: overlapWords });
     const note = overlapLib.overlapNote(same, { max: overlapMax });
-    // Бот редактора в Телеграме с разметкой HTML: простой текст для ВКонтакте экранируется.
+    // Бот редактора в Телеграме с разметкой HTML: простой текст для ВКонтакте экранируется,
+    // пост для MAX уже в HTML с теми же тегами <b> и <a>.
     const shown = platform === 'vk' ? postLib.escapeHtml(post.text) : post.text;
     const head = `Оценка нейросети: ${r.relevance}/10${post.truncated ? ', текст обрезан' : ''}`;
     out.push({

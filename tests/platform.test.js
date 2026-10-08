@@ -91,3 +91,30 @@ test('публикация: пост под ВКонтакте уходит на
   assert.strictEqual(await run({ PLATFORM: 'vk', VK_GROUP_ID: '1' }), text);
   assert.strictEqual(await run({}), text.replace(/&/g, '&amp;').replace(/</g, '&lt;'));
 });
+
+test('сбор под MAX: промпт max.md, пост в HTML, редактору без двойного экранирования', { skip }, async () => {
+  const wf = load('collect.json');
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'cf-'));
+  const db = path.join(tmp, 'log.sqlite');
+  const nodes = { Настройки: j([{ CF_DB_PATH: db, PLATFORM: 'max' }]), Ленты: j([{ name: 'Пример' }]) };
+  // Синтетическая запись ленты.
+  const description = 'Лаборатория выложила в открытый доступ языковую модель для распознавания речи и её веса.';
+  nodes['Отбор'] = await runNode(wf, 'Отбор', j([{ title: 'Языковая модель & речь', link: 'https://example.com/m1', contentSnippet: description }]), nodes);
+  nodes['Промпт'] = await runNode(wf, 'Промпт', nodes['Отбор'], nodes);
+  assert.match(nodes['Промпт'][0].json.prompt, /канала в мессенджере MAX/);
+
+  const text = 'Вышла открытая модель для распознавания речи, веса уже доступны.';
+  const answer = { choices: [{ message: { content: JSON.stringify({ relevance: 7, text }) } }] };
+  const d = (await runNode(wf, 'Разбор и пост', j([answer]), nodes))[0].json;
+  assert.strictEqual(d.text, `<b>Языковая модель &amp; речь</b>\n\n${text}\n\nИсточник: <a href="https://example.com/m1">Пример</a>`);
+  assert.ok(d.editorText.endsWith('\n\n' + d.text));
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+test('публикация: площадка без отправки останавливает запуск с понятной ошибкой', { skip }, async () => {
+  const wf = load('publish.json');
+  await assert.rejects(
+    runNode(wf, 'Следующий пост', [], { Настройки: j([{ CF_DB_PATH: ':memory:', PLATFORM: 'max' }]) }),
+    /пока не поддерживается/
+  );
+});

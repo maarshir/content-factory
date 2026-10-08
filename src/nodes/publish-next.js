@@ -10,6 +10,7 @@
 const { DatabaseSync } = require('node:sqlite');
 const settings = $('Настройки').first().json;
 const platform = postLib.platformOf(settings);
+if (platform !== 'telegram' && platform !== 'vk') throw new Error(`публикация на площадку ${platform} пока не поддерживается`);
 
 // Для ВКонтакте нужен номер сообщества: запись уходит на стену с owner_id = -номер.
 let ownerId = '';

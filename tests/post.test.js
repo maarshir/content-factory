@@ -109,14 +109,16 @@ test('площадка из «Настроек»: по умолчанию telegr
   assert.strictEqual(platformOf({}), 'telegram');
   assert.strictEqual(platformOf({ PLATFORM: '' }), 'telegram');
   assert.strictEqual(platformOf({ PLATFORM: ' VK ' }), 'vk');
-  assert.throws(() => platformOf({ PLATFORM: 'max' }), /неизвестная площадка/);
+  assert.strictEqual(platformOf({ PLATFORM: 'Max' }), 'max');
+  assert.throws(() => platformOf({ PLATFORM: 'ok' }), /неизвестная площадка/);
 });
 
 test('сборка по площадке', () => {
   const fields = { title: 'A&B', text: 'Текст новости достаточной длины.', link: 'https://a.ru/1' };
   assert.strictEqual(buildPostFor('telegram', fields).parse_mode, 'HTML');
   assert.ok(buildPostFor('vk', fields).text.startsWith('A&B\n\n'));
-  assert.throws(() => buildPostFor('max', fields), /неизвестная площадка/);
+  assert.strictEqual(buildPostFor('max', fields).format, 'html');
+  assert.throws(() => buildPostFor('ok', fields), /неизвестная площадка/);
 });
 
 test('промпт ВКонтакте: все поля подставляются, тот же формат JSON', () => {
@@ -124,4 +126,45 @@ test('промпт ВКонтакте: все поля подставляютс�
   const filled = fillPrompt(tpl, { title: 'T', description: 'D', link: 'https://a.ru', maxLength: 900 });
   assert.ok(!/\{\{\s*\w+\s*\}\}/.test(filled));
   assert.ok(filled.includes('"relevance"') && filled.includes('"text"'));
+});
+
+const { buildMaxPost, MAX_TEXT_LIMIT } = require('../src/post');
+
+test('MAX: заголовок жирным, разметка экранирована, ссылка отдельной строкой', () => {
+  const p = buildMaxPost({ title: 'Модель <X>  & R&D', text: 'Первый абзац.\r\n\r\n\r\nВторой с <тегом>.', link: 'https://www.a.ru/n?a=1&b="2"' });
+  assert.strictEqual(
+    p.text,
+    '<b>Модель &lt;X&gt; &amp; R&amp;D</b>\n\nПервый абзац.\n\nВторой с &lt;тегом&gt;.\n\n' +
+      'Источник: <a href="https://www.a.ru/n?a=1&amp;b=%222%22">a.ru</a>'
+  );
+  assert.strictEqual(p.format, 'html');
+  assert.ok(!('parse_mode' in p));
+  assert.strictEqual(p.truncated, false);
+});
+
+test('MAX: без заголовка, своё имя источника, ошибки как у других площадок', () => {
+  const p = buildMaxPost({ text: 'Текст новости достаточной длины.', link: 'https://habr.com/1', sourceName: 'Хабр' });
+  assert.ok(p.text.startsWith('Текст новости'));
+  assert.ok(p.text.endsWith('\n\nИсточник: <a href="https://habr.com/1">Хабр</a>'));
+  assert.throws(() => buildMaxPost({ text: 'Текст', link: '' }), /источник/);
+  assert.throws(() => buildMaxPost({ text: ' ', link: 'https://a.ru' }), /пустой/);
+});
+
+test('MAX: длина с тегами и сущностями не больше 4000', () => {
+  assert.strictEqual(MAX_TEXT_LIMIT, 4000);
+  const p = buildMaxPost({ title: 'Заголовок', text: 'A < B & C > D. '.repeat(600), link: 'https://a.ru/1' });
+  assert.ok(p.truncated);
+  assert.ok(p.text.length <= MAX_TEXT_LIMIT, String(p.text.length));
+  assert.ok(p.text.endsWith('</a>'));
+  assert.ok(!/&[a-z]*$/.test(p.text.split('\n\nИсточник')[0]), 'сущность не разорвана');
+  const small = buildMaxPost({ text: '&'.repeat(500), link: 'https://a.ru/1' }, { limit: 200 });
+  assert.ok(small.text.length <= 200);
+});
+
+test('промпт MAX: все поля подставляются, тот же формат JSON, без разметки', () => {
+  const tpl = fs.readFileSync(path.join(__dirname, '..', 'prompts', 'max.md'), 'utf8');
+  const filled = fillPrompt(tpl, { title: 'T', description: 'D', link: 'https://a.ru', maxLength: 900 });
+  assert.ok(!/\{\{\s*\w+\s*\}\}/.test(filled));
+  assert.ok(filled.includes('"relevance"') && filled.includes('"text"'));
+  assert.match(filled, /MAX/);
 });

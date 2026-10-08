@@ -111,6 +111,19 @@ n8n откроется на http://localhost:5678, при первом вход�
 
 Сообщение уходит методом [POST /messages](https://dev.max.ru/docs-api/methods/POST/messages) с разметкой HTML (`format: html`), текст до 4000 знаков. Чтобы посты собирались сразу под MAX, в «Настройках» конвейера сбора тоже указать `PLATFORM=max`. Число попыток, интервал и тихие часы те же, что для Телеграма.
 
+## Обновление кода в работающем n8n
+
+Повторный импорт файлов из `workflows/` создаёт новые копии конвейеров без учётных данных и настроек. Чтобы обновить только код узлов Code, выгрузить конвейеры из n8n, пересобрать в них код скриптом `scripts/update-n8n.js` и загрузить обратно с теми же номерами:
+
+```
+git -C ~/content-factory pull
+docker compose exec -u root n8n rm -rf /tmp/cf
+docker compose cp ~/content-factory n8n:/tmp/cf
+docker compose exec n8n sh -c 'n8n export:workflow --all --output=/tmp/all.json && node /tmp/cf/scripts/update-n8n.js /tmp/all.json /tmp/upd.json && n8n import:workflow --input=/tmp/upd.json'
+```
+
+Команды `docker compose` выполнять в папке, где лежит `docker-compose.yml` с n8n. Старую копию `/tmp/cf` удаляет root: её создаёт `docker compose cp`, а не пользователь n8n. Скрипт меняет только узлы с заметкой «Код: src/nodes/...», учётные данные, «Настройки» и остальные узлы остаются как были. После импорта n8n выключает обновлённые конвейеры: включить их заново (Active).
+
 ## Версия n8n и Node
 
 Образ закреплён на `n8nio/n8n:2.41.5`. По Dockerfile этой версии в репозитории n8n (`docker/images/n8n/Dockerfile`, проверено 02.10.2026) образ собран на Node 26.7.0, поэтому журнал работает на встроенном `node:sqlite` без сторонних пакетов. Узлам Code модуль разрешён переменной `NODE_FUNCTION_ALLOW_BUILTIN=node:sqlite`, остальные встроенные модули закрыты.

@@ -36,14 +36,31 @@ function escapeAttr(s) {
   return escapeHtml(s).replace(/"/g, '&quot;');
 }
 
+// Разбор ссылки: { protocol, hostname, href } или null, если ссылка нечитаемая.
+// В узлах Code n8n 2.x (отдельный процесс task runner) глобального URL нет,
+// тогда ссылка разбирается регулярным выражением.
+function parseLink(raw) {
+  const s = String(raw || '').trim();
+  if (typeof URL === 'function') {
+    try {
+      const u = new URL(s);
+      return { protocol: u.protocol, hostname: u.hostname, href: u.href };
+    } catch {
+      return null;
+    }
+  }
+  const m = /^([a-z][a-z0-9+.-]*):(\/\/([^/?#\s]*))?(\S*)$/i.exec(s);
+  if (!m) return null;
+  const protocol = m[1].toLowerCase() + ':';
+  const hostname = (m[3] || '').replace(/^[^@]*@/, '').replace(/:\d*$/, '').toLowerCase();
+  if ((protocol === 'http:' || protocol === 'https:') && !hostname) return null;
+  return { protocol, hostname, href: s };
+}
+
 // Ссылка на источник обязательна: без неё или с нечитаемой ссылкой пост не собирается.
 function sourceUrl(link) {
-  let u;
-  try {
-    u = new URL(String(link || '').trim());
-  } catch {
-    throw new Error('нет ссылки на источник');
-  }
+  const u = parseLink(link);
+  if (!u) throw new Error('нет ссылки на источник');
   if (u.protocol !== 'http:' && u.protocol !== 'https:') throw new Error('ссылка на источник не http(s)');
   return u;
 }
@@ -165,6 +182,7 @@ if (typeof module !== 'undefined') {
     MAX_FORMAT,
     PLATFORMS,
     escapeHtml,
+    parseLink,
     truncate,
     buildPost,
     buildVkPost,

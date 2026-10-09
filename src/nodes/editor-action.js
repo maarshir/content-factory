@@ -1,6 +1,6 @@
 // Узел «Действие»: нажатие кнопки или ответ на черновик -> решение в журнал.
 // «Опубликовать» ставит пост в очередь, «Отклонить» пишет причину, «Переписать»
-// готовит промпт для нейросети. Команды не из чата редактора не выполняются.
+// готовит промпт для нейросети под площадку PLATFORM. Команды не из чата редактора не выполняются.
 // @include src/filter.js as filterLib
 // @include src/log.js as logLib
 // @include src/editor.js as editorLib
@@ -11,6 +11,8 @@ const { DatabaseSync } = require('node:sqlite');
 const settings = $('Настройки').first().json;
 const update = $('Телеграм').first().json;
 const maxLength = Number(settings.MAX_LENGTH) || 1200;
+const platform = postLib.platformOf(settings);
+const CHANNEL = { telegram: 'Телеграм-канала', vk: 'сообщества ВКонтакте', max: 'канала в мессенджере MAX' };
 
 const cmd = editorLib.parseUpdate(update, { editorChatId: settings.EDITOR_CHAT_ID });
 // Чужие сообщения без кнопки остаются без ответа.
@@ -34,9 +36,10 @@ if (cmd.kind === 'button' || cmd.kind === 'reply') {
 
 const prompt = result.rewrite
   ? postLib.fillPrompt(PROMPT, {
+      channel: CHANNEL[platform],
       title: item.title,
       link: item.link,
-      draft: editorLib.draftBody(item.post),
+      draft: editorLib.draftBody(item.post, item.title),
       note: result.rewrite.note,
       maxLength,
     })

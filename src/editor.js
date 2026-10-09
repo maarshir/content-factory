@@ -78,10 +78,17 @@ const STATUS_ANSWER = {
   rejected: 'Уже отклонено',
 };
 
+// Черновик для сообщения редактору с parse_mode HTML: пост для Телеграма и MAX уже
+// в разметке, пост для ВКонтакте простым текстом экранируется.
+function showPost(post) {
+  const s = String(post ?? '');
+  return /<\/?[a-z][^>]*>/i.test(s) ? s : escapeHtml(s);
+}
+
 // Текст сообщения с черновиком после решения: строка о решении, затем пост.
 // Строка не длиннее 64 знаков: столько оставляет под неё сборка поста.
 function decided(line, post) {
-  return `${escapeHtml(short(line, 64))}\n\n${post}`;
+  return `${escapeHtml(short(line, 64))}\n\n${showPost(post)}`;
 }
 
 // Выполняет команду над журналом (log из createLog). Возвращает
@@ -126,13 +133,15 @@ function unescapeHtml(s) {
 }
 
 // Текст черновика без заголовка, строки источника и разметки: его видит нейросеть.
-function draftBody(post) {
+// Заголовок поста ВКонтакте идёт первой строкой без разметки, его узнаёт title.
+function draftBody(post, title) {
   const parts = String(post ?? '').split('\n\n');
-  if (parts.length > 1 && /^<b>/.test(parts[0])) parts.shift();
+  const head = String(title ?? '').replace(/\s+/g, ' ').trim();
+  if (parts.length > 1 && (/^<b>/.test(parts[0]) || (head && parts[0].trim() === head))) parts.shift();
   if (parts.length > 1 && /^Источник: /.test(parts[parts.length - 1])) parts.pop();
   return unescapeHtml(parts.join('\n\n').replace(/<[^>]*>/g, '')).trim();
 }
 
 if (typeof module !== 'undefined') {
-  module.exports = { ACTIONS, DEFAULT_NOTE, parseUpdate, applyAction, draftBody, idFromKeyboard };
+  module.exports = { ACTIONS, DEFAULT_NOTE, parseUpdate, applyAction, draftBody, idFromKeyboard, showPost };
 }

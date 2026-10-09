@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS items (
   link TEXT NOT NULL,
   title TEXT NOT NULL,
   source TEXT,
+  description TEXT,
   status TEXT NOT NULL CHECK (status IN ('collected', 'queued', 'rejected', 'published')),
   reason TEXT,
   relevance REAL,
@@ -75,9 +76,13 @@ function createLog(db, options = {}) {
         db.exec('ROLLBACK');
         throw e;
       }
-      return;
+    } else {
+      db.exec(SCHEMA);
     }
-    db.exec(SCHEMA);
+    // Описание из ленты появилось в журнале позже: старым записям поле добавляется пустым,
+    // для них проверка на совпадения при переписывании пропускается.
+    const cols = db.prepare('PRAGMA table_info(items)').all().map((c) => c.name);
+    if (!cols.includes('description')) db.exec('ALTER TABLE items ADD COLUMN description TEXT');
   }
 
   // Новая запись или повтор уже известной ссылки. Повтор не создаёт строку и
@@ -90,10 +95,11 @@ function createLog(db, options = {}) {
     const old = get(key);
     if (old) return { added: false, item: old };
     const t = now();
+    const description = String(item.description || '').trim() || null;
     db.prepare(
-      `INSERT INTO items (url_key, link, title, source, status, collected_at, updated_at)
-       VALUES (?, ?, ?, ?, 'collected', ?, ?)`
-    ).run(key, link, title, item.source || null, t, t);
+      `INSERT INTO items (url_key, link, title, source, description, status, collected_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, 'collected', ?, ?)`
+    ).run(key, link, title, item.source || null, description, t, t);
     return { added: true, item: get(key) };
   }
 

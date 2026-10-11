@@ -18,7 +18,7 @@
 
 ## Ключ нейросети
 
-По умолчанию Groq. Ключ создаётся в [консоли Groq](https://console.groq.com/keys), это `LLM_API_KEY`. Адрес `LLM_BASE_URL=https://api.groq.com/openai/v1`, модель `LLM_MODEL` выбрать из [списка моделей Groq](https://console.groq.com/docs/models). Для другого поставщика поменять адрес, ключ и имя модели; для GigaChat поднять [gpt2giga](https://github.com/ai-forever/gpt2giga) и указать его адрес.
+По умолчанию Groq. Ключ создаётся в [консоли Groq](https://console.groq.com/keys), это `LLM_API_KEY`. Адрес `LLM_BASE_URL=https://api.groq.com/openai/v1`, модель `LLM_MODEL` выбрать из [списка моделей Groq](https://console.groq.com/docs/models). В живом запуске работает `openai/gpt-oss-120b`: ответ JSON разбирается, рассуждения модель отдаёт отдельным полем, и в текст поста они не попадают. `llama-3.3-70b-versatile` на обычном ключе отвечает 404 `model_not_found`. Для другого поставщика поменять адрес, ключ и имя модели; для GigaChat поднять [gpt2giga](https://github.com/ai-forever/gpt2giga) и указать его адрес.
 
 ## Публичный адрес
 
@@ -54,6 +54,7 @@ n8n откроется на http://localhost:5678, при первом вход�
 ## Конвейер сбора
 
 1. В n8n: Workflows, Import from File, `workflows/collect.json`.
+   Первый импорт всех трёх конвейеров делать через окно n8n: `n8n import:workflow` из командной строки падает с ошибкой `NOT NULL constraint failed: workflow_entity.id`, потому что в файлах `workflows/*.json` нет id. Команда из раздела «Обновление кода в работающем n8n» работает: она загружает выгрузку из n8n, где id уже есть.
 2. Учётные данные: в узле «Нейросеть» создать учётные данные OpenAI с ключом и Base URL (для Groq `https://api.groq.com/openai/v1`), в узле «Черновик редактору» учётные данные Telegram с токеном бота.
 3. В узле «Настройки» вписать `LLM_MODEL`, `EDITOR_CHAT_ID` и тот же адрес в `LLM_BASE_URL`. Там же `MAX_ITEMS` (сколько новостей за запуск уходит в нейросеть), `MAX_LENGTH` (длина поста в промпте), `MIN_RELEVANCE` (порог оценки нейросети), `OVERLAP_WORDS` и `OVERLAP_MAX` (длина цепочки слов и доля дословных совпадений с описанием, выше которой редактор видит пометку).
 4. Запустить вручную кнопкой Execute workflow, проверить, что черновики пришли в чат редактора, затем включить конвейер. По умолчанию он запускается раз в три часа.

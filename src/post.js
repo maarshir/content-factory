@@ -150,6 +150,69 @@ function buildMaxPost({ title, text, link, sourceName } = {}, options = {}) {
   return { text: out, format: MAX_FORMAT, visibleLength: out.length, truncated: visibleBody !== body };
 }
 
+const POINT_MARK = '🔹';
+
+// Видимая длина текста с разметкой HTML Телеграма: без тегов, сущность как один знак.
+function visibleLength(html) {
+  return String(html ?? '')
+    .replace(/<[^>]*>/g, '')
+    .replace(/&(lt|gt|amp|quot|#39);/g, '_').length;
+}
+
+// Пост по частям от нейросети для Телеграма, подписью к обложке (до 1024 знаков):
+//   эмодзи и заголовок жирным, суть, пункты в цитате, ссылки, хэштег рубрики.
+//   🧠 <b>Заголовок</b>
+//
+//   Суть в одном-двух предложениях.
+//
+//   <blockquote>🔹 пункт
+//   🔹 пункт</blockquote>
+//
+//   📖 Читать подробнее · 🔗 Хабр
+//   #модели
+// Подробный пересказ (telegraph) необязателен: без него остаётся только источник.
+// Не влезает: сначала убираются пункты с конца, потом обрезается суть.
+function buildCardPost(card = {}, options = {}) {
+  const url = sourceUrl(card.link);
+  const limit = options.limit ?? TELEGRAM_CAPTION_LIMIT;
+  const name = String(card.sourceName || '').trim() || url.hostname.replace(/^www\./, '');
+  const title = String(card.title || '').replace(/\s+/g, ' ').trim();
+  const lead = String(card.lead || '').replace(/\s+/g, ' ').trim();
+  if (!title) throw new Error('нет заголовка');
+  if (!lead) throw new Error('пустой текст поста');
+  const emoji = String(card.emoji || '').trim();
+  const tag = String(card.tag || '').trim().replace(/\s+/g, '_');
+  let points = (card.points || []).map((p) => String(p).replace(/\s+/g, ' ').trim()).filter(Boolean);
+  const more = parseLink(card.telegraph);
+  const moreOk = more && more.protocol === 'https:';
+
+  const links = moreOk
+    ? `📖 <a href="${escapeAttr(more.href)}">Читать подробнее</a> · 🔗 <a href="${escapeAttr(url.href)}">${escapeHtml(name)}</a>`
+    : `🔗 Источник: <a href="${escapeAttr(url.href)}">${escapeHtml(name)}</a>`;
+  const head = `${emoji ? emoji + ' ' : ''}<b>${escapeHtml(title)}</b>`;
+  const foot = links + (tag ? `\n#${escapeHtml(tag)}` : '');
+
+  const compose = (body, list) =>
+    `${head}\n\n${escapeHtml(body)}\n\n` +
+    (list.length ? `<blockquote>${list.map((p) => `${POINT_MARK} ${escapeHtml(p)}`).join('\n')}</blockquote>\n\n` : '') +
+    foot;
+
+  let body = lead;
+  let html = compose(body, points);
+  while (visibleLength(html) > limit && points.length) {
+    points = points.slice(0, -1);
+    html = compose(body, points);
+  }
+  if (visibleLength(html) > limit) {
+    const room = limit - visibleLength(compose('', []));
+    if (room < 20) throw new Error('не хватает места для текста поста');
+    body = truncate(lead, room);
+    html = compose(body, []);
+  }
+  const truncated = body !== lead || points.length < (card.points || []).filter((p) => String(p).trim()).length;
+  return { text: html, parse_mode: 'HTML', visibleLength: visibleLength(html), truncated };
+}
+
 // Площадка из поля PLATFORM узла «Настройки»; пусто значит telegram.
 function platformOf(settings = {}) {
   const p = String((settings && settings.PLATFORM) ?? '').trim().toLowerCase() || 'telegram';
@@ -188,6 +251,8 @@ if (typeof module !== 'undefined') {
     buildVkPost,
     buildMaxPost,
     buildPostFor,
+    buildCardPost,
+    visibleLength,
     platformOf,
     fillPrompt,
   };

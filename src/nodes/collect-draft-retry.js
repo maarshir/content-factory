@@ -15,7 +15,7 @@ try {
     // Без номера попытки повтора нет, чтобы не уйти в бесконечный круг.
     if (draft.id === undefined) {
       try {
-        draft = { ...$('Разбор и пост').itemMatching(i).json, attempt: undefined };
+        draft = { ...$('Сборка поста').itemMatching(i).json, attempt: undefined };
       } catch {
         return;
       }

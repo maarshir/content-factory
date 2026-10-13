@@ -83,6 +83,8 @@ function createLog(db, options = {}) {
     // для них проверка на совпадения при переписывании пропускается.
     const cols = db.prepare('PRAGMA table_info(items)').all().map((c) => c.name);
     if (!cols.includes('description')) db.exec('ALTER TABLE items ADD COLUMN description TEXT');
+    // Части поста для Телеграма (src/card.js): заголовок обложки, рубрика, картинка, Телеграф.
+    if (!cols.includes('card')) db.exec('ALTER TABLE items ADD COLUMN card TEXT');
   }
 
   // Новая запись или повтор уже известной ссылки. Повтор не создаёт строку и
@@ -157,9 +159,11 @@ function createLog(db, options = {}) {
     const old = get(key);
     if (!old) throw new Error(`нет в журнале: ${link}`);
     if (old.status !== 'collected') throw new Error(`черновик только для collected, сейчас ${old.status}`);
-    db.prepare('UPDATE items SET post = ?, relevance = ?, updated_at = ? WHERE url_key = ?').run(
+    // extra.card: части поста строкой JSON; не передано, остаются прежние.
+    db.prepare('UPDATE items SET post = ?, relevance = ?, card = ?, updated_at = ? WHERE url_key = ?').run(
       text,
       extra.relevance ?? old.relevance ?? null,
+      extra.card ?? old.card ?? null,
       now(),
       key
     );

@@ -20,6 +20,17 @@ services:
     volumes:
       # Здесь же лежит журнал: /home/node/.n8n/content-factory.sqlite
       - n8n_data:/home/node/.n8n
+    depends_on:
+      - cover
+
+  # Обложки постов (cover/): n8n обращается к нему по адресу http://cover:3000.
+  # Порт наружу не открыт, сервис виден только внутри этой сети.
+  cover:
+    build: ./cover
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
 
 volumes:
   n8n_data:

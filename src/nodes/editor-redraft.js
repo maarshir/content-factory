@@ -10,6 +10,7 @@
 // @include src/post.js as postLib
 // @include src/overlap.js as overlapLib
 // @include src/editor.js as editorLib
+// @include src/card.js as cardLib
 
 const { DatabaseSync } = require('node:sqlite');
 const settings = $('Настройки').first().json;
@@ -17,6 +18,9 @@ const platform = postLib.platformOf(settings);
 const limit = { telegram: postLib.TELEGRAM_TEXT_LIMIT, vk: postLib.VK_TEXT_LIMIT, max: postLib.MAX_TEXT_LIMIT }[platform];
 const overlapWords = Number(settings.OVERLAP_WORDS) || overlapLib.DEFAULT_WORDS;
 const overlapMax = settings.OVERLAP_MAX ?? overlapLib.DEFAULT_MAX;
+const channel = cardLib.channelOf(settings);
+// Подпись к обложке: предел 1024, запас под строку о переписывании и пометку.
+const RESERVE = 160;
 
 const db = new DatabaseSync(settings.CF_DB_PATH);
 try {
@@ -34,8 +38,33 @@ try {
     let post = null;
     let note = '';
     let relevance = item.relevance;
+    const oldCard = cardLib.readCard(item.card);
+    let card = null;
     if (typeof content !== 'string') {
       failure = 'ошибка запроса к нейросети';
+    } else if (oldCard) {
+      // Пост по частям: заголовок, рубрика, картинка и Телеграф прежние, остальное новое.
+      const r = parseLib.parseCardResponse(content, { minRelevance: 0, title: false });
+      if (!r.ok) {
+        failure = r.reason;
+      } else {
+        try {
+          card = { ...oldCard, emoji: r.card.emoji, lead: r.card.lead, points: r.card.points };
+          post = postLib.buildCardPost(
+            { ...card, link: item.link, sourceName: item.source },
+            { limit: postLib.TELEGRAM_CAPTION_LIMIT - RESERVE }
+          );
+          relevance = r.relevance;
+          if (item.description) {
+            const same = overlapLib.overlap(r.text, item.description, { words: overlapWords });
+            note = overlapLib.overlapNote(same, { max: overlapMax });
+          }
+        } catch (e) {
+          card = null;
+          post = null;
+          failure = 'пост не собран: ' + e.message;
+        }
+      }
     } else {
       // Порог не применяется: редактор уже решил, что новость нужна.
       const r = parseLib.parseModelResponse(content, { minRelevance: 0 });
@@ -59,20 +88,26 @@ try {
         }
       }
     }
-    if (post) log.drafted(item.link, post.text, { relevance });
+    if (post) log.drafted(item.link, post.text, { relevance, card: card ? cardLib.storeCard(card) : undefined });
     const head = post
       ? `Переписано. Оценка нейросети: ${relevance}/10${post.truncated ? ', текст обрезан' : ''}`
       : `Не переписано (${failure})`;
+    // Бот редактора шлёт с parse_mode HTML: пост ВКонтакте простым текстом экранируется.
+    const editorText =
+      `${postLib.escapeHtml(head.length > 64 ? head.slice(0, 63) + '…' : head)}` +
+      `${note ? '\n' + note : ''}\n\n${editorLib.showPost(post ? post.text : item.post)}`;
+    const shownCard = card || oldCard;
     out.push({
       json: {
         id: item.id,
         link: item.link,
         rewritten: Boolean(post),
-        // Бот редактора шлёт с parse_mode HTML: пост ВКонтакте простым текстом экранируется.
-        editorText:
-          `${postLib.escapeHtml(head.length > 64 ? head.slice(0, 63) + '…' : head)}` +
-          `${note ? '\n' + note : ''}\n\n${editorLib.showPost(post ? post.text : item.post)}`,
+        editorText,
+        // Черновик с обложкой, если есть части поста и текст влезает в подпись.
+        photo: Boolean(shownCard) && postLib.visibleLength(editorText) <= postLib.TELEGRAM_CAPTION_LIMIT,
+        cover: shownCard ? cardLib.coverRequest(shownCard, channel) : null,
       },
+      pairedItem: { item: i },
     });
   });
   return out;

@@ -1,21 +1,21 @@
-// Узел «Разбор и пост»: ответ нейросети -> parse.js -> post.js -> черновик в журнал.
-// Отказ модели, низкая оценка и ошибка запроса пишутся в журнал с причиной.
-// Пересказ сверяется с описанием из ленты (overlap.js): при большой доле дословных
-// совпадений редактор видит пометку над черновиком.
-// Пост собирается под площадку PLATFORM из «Настроек»: telegram и max (HTML) или vk (простой текст).
+// Узел «Разбор»: ответ нейросети -> части поста (parse.js). Отказ модели, низкая
+// оценка и ошибка запроса пишутся в журнал с причиной, дальше идут только годные.
+// Телеграм: части поста по prompts/telegram.md; у большой новости готовится
+// страница Телеграфа с подробным пересказом (поле telegraph, её создаёт узел «Телеграф»).
+// ВКонтакте и MAX: текст поста одним куском, как раньше.
 // @include src/filter.js as filterLib
 // @include src/log.js as logLib
 // @include src/parse.js as parseLib
 // @include src/post.js as postLib
-// @include src/overlap.js as overlapLib
+// @include src/card.js as cardLib
 
 const { DatabaseSync } = require('node:sqlite');
 const settings = $('Настройки').first().json;
 const minRelevance = Number(settings.MIN_RELEVANCE ?? 6);
-const overlapWords = Number(settings.OVERLAP_WORDS) || overlapLib.DEFAULT_WORDS;
-const overlapMax = settings.OVERLAP_MAX ?? overlapLib.DEFAULT_MAX;
 const platform = postLib.platformOf(settings);
-const limit = { telegram: postLib.TELEGRAM_TEXT_LIMIT, vk: postLib.VK_TEXT_LIMIT, max: postLib.MAX_TEXT_LIMIT }[platform];
+const channel = cardLib.channelOf(settings);
+// Без ключа Телеграфа подробный пересказ не публикуется, в посте остаётся источник.
+const telegraphOn = String(settings.TELEGRAPH ?? 'on').trim().toLowerCase() !== 'off';
 
 const db = new DatabaseSync(settings.CF_DB_PATH);
 try {
@@ -31,43 +31,34 @@ try {
       log.rejected(news.link, 'ошибка запроса к нейросети');
       return;
     }
+    const base = {
+      draft: true,
+      id: news.id,
+      link: news.link,
+      title: news.title,
+      source: news.source,
+      description: news.description,
+    };
+    if (platform === 'telegram') {
+      const r = parseLib.parseCardResponse(content, { minRelevance });
+      if (!r.ok) {
+        log.rejected(news.link, r.reason, { relevance: r.relevance });
+        return;
+      }
+      const card = { ...r.card, image: news.image || '' };
+      const telegraph =
+        telegraphOn && cardLib.needFull(card, news.article)
+          ? cardLib.telegraphPage({ title: card.title, full: card.full, image: card.image, link: news.link, sourceName: news.source, channel })
+          : null;
+      out.push({ json: { ...base, relevance: r.relevance, text: r.text, card, telegraph }, pairedItem: { item: i } });
+      return;
+    }
     const r = parseLib.parseModelResponse(content, { minRelevance });
     if (!r.ok) {
       log.rejected(news.link, r.reason, { relevance: r.relevance });
       return;
     }
-    let post;
-    try {
-      // Запас 200 знаков под строки с оценкой и пометкой о совпадениях в сообщении редактору.
-      post = postLib.buildPostFor(
-        platform,
-        { title: news.title, text: r.text, link: news.link, sourceName: news.source },
-        { limit: limit - 200 }
-      );
-    } catch (e) {
-      log.rejected(news.link, 'пост не собран: ' + e.message, { relevance: r.relevance });
-      return;
-    }
-    log.drafted(news.link, post.text, { relevance: r.relevance });
-    const same = overlapLib.overlap(r.text, news.description, { words: overlapWords });
-    const note = overlapLib.overlapNote(same, { max: overlapMax });
-    // Бот редактора в Телеграме с разметкой HTML: простой текст для ВКонтакте экранируется,
-    // пост для MAX уже в HTML с теми же тегами <b> и <a>.
-    const shown = platform === 'vk' ? postLib.escapeHtml(post.text) : post.text;
-    const head = `Оценка нейросети: ${r.relevance}/10${post.truncated ? ', текст обрезан' : ''}`;
-    out.push({
-      json: {
-        id: news.id,
-        link: news.link,
-        relevance: r.relevance,
-        text: post.text,
-        // Номер повтора отправки редактору, считает узел «Повтор черновика».
-        attempt: 0,
-        overlap: Math.round(same.ratio * 100) / 100,
-        // Редактору видны оценка нейросети и пометка о совпадениях, в канал они не попадают.
-        editorText: `${head}${note ? '\n' + note : ''}\n\n${shown}`,
-      },
-    });
+    out.push({ json: { ...base, relevance: r.relevance, text: r.text, card: null, telegraph: null }, pairedItem: { item: i } });
   });
   return out;
 } finally {

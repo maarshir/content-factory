@@ -3,7 +3,7 @@ const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const PROMPTS = ['telegram.md', 'vk.md', 'max.md', 'rewrite.md'];
+const PROMPTS = ['telegram.md', 'vk.md', 'max.md', 'rewrite.md', 'rewrite-telegram.md'];
 
 for (const name of PROMPTS) {
   test(`${name}: «ИИ» вместо «AI», латиница только в названиях`, () => {

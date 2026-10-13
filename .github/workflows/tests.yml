@@ -23,5 +23,8 @@ jobs:
         with:
           node-version: '22'
 
+      - name: Зависимости сервиса обложек
+        run: npm ci --prefix cover
+
       - name: Тесты
         run: npm test

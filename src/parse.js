@@ -69,6 +69,67 @@ function parseModelResponse(raw, options = {}) {
   return { ok: true, relevance, text, reason: null };
 }
 
+// Рубрики канала: на обложке плашкой, в посте хэштегом.
+const TAGS = ['модели', 'исследования', 'продукты', 'код', 'бизнес', 'железо', 'законы', 'события'];
+const DEFAULT_TAG = 'события';
+const DEFAULT_EMOJI = '🧠';
+
+function clean(s) {
+  return String(s ?? '').replace(/\r\n?/g, '\n').replace(/[ \t]+/g, ' ').trim();
+}
+
+// Один эмодзи в начале строки или запасной: модели иногда пишут слово или несколько значков.
+function pickEmoji(raw) {
+  const s = String(raw ?? '').trim();
+  const m = s.match(/^(\p{Extended_Pictographic}(?:️|‍\p{Extended_Pictographic})*️?)/u);
+  return m ? m[1] : DEFAULT_EMOJI;
+}
+
+function pickTag(raw) {
+  const s = String(raw ?? '').toLowerCase().replace(/^#/, '').trim();
+  return TAGS.includes(s) ? s : DEFAULT_TAG;
+}
+
+// Ответ модели по prompts/telegram.md: части поста по отдельности.
+// {"relevance", "tag", "emoji", "title", "lead", "points": [...], "full"}.
+// Возвращает { ok, relevance, card, text, reason }: card это части поста,
+// text это суть и пункты одной строкой (для проверки на дословные совпадения).
+// options.title = false: заголовок не обязателен (переписывание, заголовок берётся из журнала).
+function parseCardResponse(raw, options = {}) {
+  const minRelevance = options.minRelevance ?? 6;
+  const needTitle = options.title !== false;
+  const fail = (reason, extra = {}) => ({ ok: false, relevance: null, card: null, text: '', reason, ...extra });
+
+  const data = extractJson(raw);
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return fail('ответ не JSON');
+
+  const r = typeof data.relevance === 'string' ? Number(data.relevance.replace(',', '.')) : data.relevance;
+  if (typeof r !== 'number' || !Number.isFinite(r) || r < 0 || r > 10) return fail('оценка вне шкалы 0–10');
+  const relevance = Math.round(r * 10) / 10;
+
+  const title = clean(data.title).replace(/\s+/g, ' ').replace(/[.]$/, '');
+  const lead = clean(data.lead).replace(/\s+/g, ' ');
+  const points = (Array.isArray(data.points) ? data.points : [])
+    .map((p) => clean(p).replace(/\s+/g, ' ').replace(/^[-•*–—▫️🔹\s]+/u, ''))
+    .filter(Boolean)
+    .slice(0, 5);
+  const full = typeof data.full === 'string' ? clean(data.full).replace(/\n{3,}/g, '\n\n') : '';
+  const text = [lead, ...points].join('\n');
+
+  if (relevance < minRelevance) return fail('ниже порога релевантности', { relevance, text });
+  if (needTitle && !title) return fail('нет заголовка', { relevance });
+  if (needTitle && title.length > 120) return fail('слишком длинный заголовок', { relevance });
+  if (lead.length < 20) return fail('слишком короткая суть', { relevance, text });
+  if (lead.length > 400) return fail('слишком длинная суть', { relevance, text });
+  if (points.some((p) => p.length > 200)) return fail('слишком длинный пункт', { relevance, text });
+  if (JUNK.some((re) => re.test(text) || re.test(title) || re.test(full))) {
+    return fail('похоже на отказ модели', { relevance, text });
+  }
+
+  const card = { emoji: pickEmoji(data.emoji), tag: pickTag(data.tag), title, lead, points, full };
+  return { ok: true, relevance, card, text, reason: null };
+}
+
 if (typeof module !== 'undefined') {
-  module.exports = { extractJson, parseModelResponse };
+  module.exports = { TAGS, DEFAULT_TAG, extractJson, parseModelResponse, parseCardResponse };
 }

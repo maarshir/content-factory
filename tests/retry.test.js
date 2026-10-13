@@ -102,7 +102,7 @@ test('сбор: 429 повторяется трижды, затем причин
     return { id: row.id, link, relevance: 8, text: row.post, editorText: row.post, attempt: 0 };
   });
 
-  const nodes = { Настройки: [{ json: { CF_DB_PATH: dbPath } }], 'Разбор и пост': drafts.map((json) => ({ json })) };
+  const nodes = { Настройки: [{ json: { CF_DB_PATH: dbPath } }], 'Сборка поста': drafts.map((json) => ({ json })) };
   // Элемент ошибки: входные поля и текст ошибки, как в выходе ошибок узла n8n.
   const fail = (d, error) => ({ json: { ...d, error } });
 

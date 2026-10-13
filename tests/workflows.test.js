@@ -52,15 +52,20 @@ test('в конвейерах нет ключей, токенов и досту�
         }
       }
       if (n.type === 'n8n-nodes-base.httpRequest') {
-        // Ключ только в учётных данных n8n: готовый тип (OpenAI), Query Auth (ВКонтакте) или Header Auth (MAX).
-        const auth = n.parameters.authentication;
-        assert.ok(['predefinedCredentialType', 'genericCredentialType'].includes(auth), `${f}: ${n.name}: ${auth}`);
+        // Ключ только в учётных данных n8n: готовый тип (OpenAI), Query Auth (ВКонтакте, Телеграф) или Header Auth (MAX).
+        // Без ключа только скачивание статьи и сервис обложек внутри docker compose.
+        const open = { Страница: '={{ $json.link }}', Обложка: 'http://cover:3000/cover' };
+        const auth = n.parameters.authentication ?? 'none';
+        if (auth === 'none') assert.strictEqual(n.parameters.url, open[n.name], `${f}: ${n.name}: запрос без учётных данных`);
+        else assert.ok(['predefinedCredentialType', 'genericCredentialType'].includes(auth), `${f}: ${n.name}: ${auth}`);
         if (auth === 'genericCredentialType') {
           assert.ok(['httpQueryAuth', 'httpHeaderAuth'].includes(n.parameters.genericAuthType), `${f}: ${n.name}`);
         }
         const body = ((n.parameters.bodyParameters || {}).parameters || []).map((x) => x.name);
         assert.ok(!body.includes('access_token'), `${f}: ${n.name}: ключ в теле запроса`);
-        assert.ok(!n.parameters.sendHeaders && !n.parameters.headerParameters, `${f}: ${n.name}: заголовки вручную`);
+        // Вручную можно задать только User-Agent (статьи без него отдают не все сайты).
+        const headers = ((n.parameters.headerParameters || {}).parameters || []).map((x) => x.name);
+        assert.ok(headers.every((h) => h === 'User-Agent'), `${f}: ${n.name}: заголовки вручную`);
         assert.ok(!n.parameters.sendQuery, `${f}: ${n.name}: ключ в адресе`);
         assert.doesNotMatch(String(n.parameters.url), /token|access_token|key=/i, `${f}: ${n.name}: ключ в адресе`);
       }
@@ -86,15 +91,32 @@ test('узлам Code нужен только node:sqlite', () => {
 test('сбор: узлы и порядок', () => {
   const wf = load('collect.json');
   const byName = Object.fromEntries(wf.nodes.map((n) => [n.name, n]));
-  const chain = ['Расписание', 'Настройки', 'Ленты', 'Чтение RSS', 'Отбор', 'Промпт', 'Нейросеть', 'Разбор и пост', 'Черновик редактору'];
+  const chain = ['Расписание', 'Настройки', 'Ленты', 'Чтение RSS', 'Отбор', 'Страница', 'Промпт', 'Нейросеть', 'Разбор', 'Подробно?', 'Телеграф', 'Сборка поста', 'С обложкой?', 'Обложка', 'Черновик с обложкой'];
   const types = {
     Расписание: 'n8n-nodes-base.scheduleTrigger',
     Настройки: 'n8n-nodes-base.set',
     'Чтение RSS': 'n8n-nodes-base.rssFeedRead',
     Нейросеть: 'n8n-nodes-base.httpRequest',
+    Страница: 'n8n-nodes-base.httpRequest',
+    Телеграф: 'n8n-nodes-base.httpRequest',
+    Обложка: 'n8n-nodes-base.httpRequest',
+    'Черновик с обложкой': 'n8n-nodes-base.telegram',
     'Черновик редактору': 'n8n-nodes-base.telegram',
   };
   for (const name of chain) assert.ok(byName[name], name);
+  const outs = (from, i) => (wf.connections[from].main[i] || []).map((c) => c.node);
+  // Без подробного пересказа сразу в сборку; без обложки и при ошибках черновик уходит текстом.
+  assert.deepStrictEqual(outs('Подробно?', 1), ['Сборка поста']);
+  assert.deepStrictEqual(outs('С обложкой?', 1), ['Черновик редактору']);
+  assert.deepStrictEqual(outs('Обложка', 1), ['Черновик редактору']);
+  assert.deepStrictEqual(outs('Черновик с обложкой', 1), ['Черновик редактору']);
+  assert.strictEqual(byName['Обложка'].parameters.url, 'http://cover:3000/cover');
+  assert.strictEqual(byName['Обложка'].parameters.options.response.response.responseFormat, 'file');
+  assert.strictEqual(byName['Телеграф'].parameters.genericAuthType, 'httpQueryAuth');
+  const photo = byName['Черновик с обложкой'].parameters;
+  assert.strictEqual(photo.operation, 'sendPhoto');
+  assert.strictEqual(photo.binaryData, true);
+  assert.strictEqual(photo.additionalFields.parse_mode, 'HTML');
   for (const [name, type] of Object.entries(types)) assert.strictEqual(byName[name].type, type, name);
   for (let i = 0; i + 1 < chain.length; i++) {
     assert.strictEqual(wf.connections[chain[i]].main[0][0].node, chain[i + 1], chain[i]);
@@ -110,9 +132,14 @@ test('сбор: узлы и порядок', () => {
   const tg = byName['Черновик редактору'].parameters;
   const buttons = tg.inlineKeyboard.rows[0].row.buttons;
   assert.deepStrictEqual(buttons.map((b) => b.text), ['Опубликовать', 'Переписать', 'Отклонить']);
+  const id = "$json.id ?? $('Сборка поста').item.json.id";
   assert.deepStrictEqual(
     buttons.map((b) => b.additionalFields.callback_data),
-    ['=pub:{{ $json.id }}', '=rew:{{ $json.id }}', '=rej:{{ $json.id }}']
+    [`=pub:{{ ${id} }}`, `=rew:{{ ${id} }}`, `=rej:{{ ${id} }}`]
+  );
+  assert.deepStrictEqual(
+    photo.inlineKeyboard.rows[0].row.buttons.map((b) => b.additionalFields.callback_data),
+    ["=pub:{{ $('Сборка поста').item.json.id }}", "=rew:{{ $('Сборка поста').item.json.id }}", "=rej:{{ $('Сборка поста').item.json.id }}"]
   );
   assert.strictEqual(tg.additionalFields.parse_mode, 'HTML');
   assert.match(tg.chatId, /EDITOR_CHAT_ID/);
@@ -136,6 +163,12 @@ function runNode(wf, name, input, nodes) {
     return require(m);
   };
   return new AsyncFunction('$input', '$', 'require', node.parameters.jsCode)(wrap(input), $, req);
+}
+
+// «Разбор» и «Сборка поста» подряд (без страницы Телеграфа), как в конвейере сбора.
+async function draftAndBuild(wf, input, nodes) {
+  nodes['Разбор'] = await runNode(wf, 'Разбор', input, nodes);
+  return runNode(wf, 'Сборка поста', nodes['Разбор'], nodes);
 }
 
 const j = (arr) => arr.map((json) => ({ json }));
@@ -168,29 +201,57 @@ test('сбор: от лент до черновика на подменённы�
   // Повторный запуск на тех же лентах ничего нового не даёт.
   assert.deepStrictEqual(await runNode(wf, 'Отбор', rss, nodes), []);
 
-  nodes['Промпт'] = await runNode(wf, 'Промпт', nodes['Отбор'], nodes);
-  assert.match(nodes['Промпт'][0].json.prompt, /Заголовок: Вышла новая открытая языковая модель/);
-  assert.match(nodes['Промпт'][0].json.prompt, /не длиннее 800 знаков/);
-  assert.doesNotMatch(nodes['Промпт'][0].json.prompt, /\{\{/);
+  // Страница первой статьи скачалась (картинка и длинный текст), вторая нет.
+  const para = 'Модель обучена на корпусе русских текстов и выложена с открытой лицензией, веса доступны для скачивания и дообучения. ';
+  const html = `<html><head><meta content="/img/cover.jpg" property="og:image"></head><body><nav><p>Меню сайта и ссылки на разделы</p></nav>
+    <article><h1>Заголовок</h1>${[1, 2, 3, 4].map((n) => `<p>Часть ${n}. ${para.repeat(4)}</p>`).join('')}</article></body></html>`;
+  nodes['Промпт'] = await runNode(wf, 'Промпт', j([{ html }, { error: 'timeout' }]), nodes);
+  const p0 = nodes['Промпт'][0].json;
+  assert.match(p0.prompt, /Заголовок: Вышла новая открытая языковая модель/);
+  assert.match(p0.prompt, /Модель обучена на корпусе/);
+  assert.doesNotMatch(p0.prompt, /Меню сайта/);
+  assert.doesNotMatch(p0.prompt, /\{\{/);
+  assert.strictEqual(p0.image, 'https://example.com/img/cover.jpg');
+  assert.ok(p0.article.length > 1500);
+  assert.match(nodes['Промпт'][1].json.prompt, /\(текста статьи нет\)/);
 
-  // Синтетические ответы нейросети: годный и с низкой оценкой.
+  // Синтетические ответы нейросети: годный с подробным пересказом и с низкой оценкой.
   const answer = (o) => ({ choices: [{ message: { content: '```json\n' + JSON.stringify(o) + '\n```' } }] });
+  const full = 'Подробный пересказ статьи о модели. '.repeat(30);
   const llm = j([
-    answer({ relevance: 8, text: 'Открыта новая модель для русского языка. Веса и код выложены, проверить можно уже сейчас.' }),
-    answer({ relevance: 3, text: 'Слабая новость без подробностей, читателям канала мало пользы.' }),
+    answer({
+      relevance: 8, tag: 'модели', emoji: '🧠', title: 'Открыта модель для русского языка',
+      lead: 'Открыта новая модель для русского языка, веса и код выложены.',
+      points: ['лицензия разрешает дообучение', 'веса уже можно скачать'], full,
+    }),
+    answer({ relevance: 3, tag: 'события', emoji: '📰', title: 'Слабая новость', lead: 'Слабая новость без подробностей.', points: [], full: '' }),
   ]);
-  const drafts = await runNode(wf, 'Разбор и пост', llm, nodes);
+  nodes['Разбор'] = await runNode(wf, 'Разбор', llm, nodes);
+  assert.strictEqual(nodes['Разбор'].length, 1);
+  const tgReq = nodes['Разбор'][0].json.telegraph;
+  assert.strictEqual(tgReq.author_name, 'Нейросети: главное за день');
+  assert.match(tgReq.content, /Подробный пересказ/);
+  // Ответ Телеграфа приходит в «Сборку поста» вместо черновика.
+  const drafts = await runNode(wf, 'Сборка поста', j([{ ok: true, result: { url: 'https://telegra.ph/Otkryta-model-10-13' } }]), nodes);
   assert.strictEqual(drafts.length, 1);
   const d = drafts[0].json;
   assert.strictEqual(d.id, nodes['Отбор'][0].json.id);
-  assert.match(d.text, /^<b>Вышла новая открытая языковая модель<\/b>/);
-  assert.match(d.text, /Источник: <a href="https:\/\/example\.com\/a\?utm_source=rss">Пример<\/a>$/);
-  assert.match(d.editorText, /^Оценка нейросети: 8\/10\n\n<b>/);
+  assert.match(d.text, /^🧠 <b>Открыта модель для русского языка<\/b>\n\nОткрыта новая модель/);
+  assert.match(d.text, /<blockquote>🔹 лицензия разрешает дообучение\n🔹 веса уже можно скачать<\/blockquote>/);
+  assert.match(d.text, /<a href="https:\/\/telegra\.ph\/Otkryta-model-10-13">Читать подробнее<\/a>/);
+  assert.match(d.text, /\n#модели$/);
+  assert.match(d.editorText, /^Оценка нейросети: 8\/10\n\n🧠 <b>/);
+  assert.strictEqual(d.photo, true);
+  assert.deepStrictEqual(d.cover, {
+    title: 'Открыта модель для русского языка', tag: 'модели', image: 'https://example.com/img/cover.jpg',
+    channel: 'Нейросети: главное за день', handle: '@neiro_glav',
+  });
 
   const { createLog } = require('../src/log.js');
   const conn = new DatabaseSync(db);
   const log = createLog(conn);
   assert.strictEqual(log.byId(d.id).post, d.text);
+  assert.strictEqual(JSON.parse(log.byId(d.id).card).telegraph, 'https://telegra.ph/Otkryta-model-10-13');
   const s = log.stats();
   assert.strictEqual(s.collected, 1);
   const reasons = Object.fromEntries(s.reasons.map((r) => [r.reason, r.count]));
@@ -206,7 +267,7 @@ test('сбор: ошибка запроса к нейросети записыв
   const nodes = { Настройки: j([{ CF_DB_PATH: db }]), Ленты: j([{ name: 'Пример' }]) };
   nodes['Отбор'] = await runNode(wf, 'Отбор', j([{ title: 'ИИ помогает врачам', link: 'https://example.com/x' }]), nodes);
   nodes['Промпт'] = await runNode(wf, 'Промпт', nodes['Отбор'], nodes);
-  const out = await runNode(wf, 'Разбор и пост', j([{ error: { message: '429' } }]), nodes);
+  const out = await draftAndBuild(wf, j([{ error: { message: '429' } }]), nodes);
   assert.deepStrictEqual(out, []);
   const conn = new DatabaseSync(db);
   const row = conn.prepare('SELECT status, reason FROM items').get();
@@ -233,18 +294,19 @@ test('сбор: пометка редактору при дословных со
   assert.strictEqual(nodes['Отбор'].length, 2);
   nodes['Промпт'] = await runNode(wf, 'Промпт', nodes['Отбор'], nodes);
   const answer = (o) => ({ choices: [{ message: { content: JSON.stringify(o) } }] });
-  const drafts = await runNode(wf, 'Разбор и пост', j([
-    answer({ relevance: 8, text: 'Веса модели можно скачать бесплатно, код обучения опубликован на Гитхабе.' }),
-    answer({ relevance: 8, text: 'Открыта модель для русского: веса бесплатны, обучающий код лежит на Гитхабе.' }),
+  const card = (lead) => ({ relevance: 8, tag: 'модели', emoji: '🧠', title: 'Открыта модель', lead, points: [], full: '' });
+  const drafts = await draftAndBuild(wf, j([
+    answer(card('Веса модели можно скачать бесплатно, код обучения опубликован на Гитхабе.')),
+    answer(card('Открыта модель для русского: веса бесплатны, обучающий код лежит на Гитхабе.')),
   ]), nodes);
   assert.strictEqual(drafts.length, 2);
   const [copied, own] = drafts.map((d) => d.json);
   assert.strictEqual(copied.overlap, 1);
-  assert.match(copied.editorText, /^Оценка нейросети: 8\/10\nДословно из источника: 100% \(порог 20%\), например «веса модели[^\n]*»\n\n<b>/);
+  assert.match(copied.editorText, /^Оценка нейросети: 8\/10\nДословно из источника: 100% \(порог 20%\), например «веса модели[^\n]*»\n\n🧠 <b>/);
   // В канал пометка не попадает.
   assert.doesNotMatch(copied.text, /Дословно/);
   assert.strictEqual(own.overlap, 0);
-  assert.match(own.editorText, /^Оценка нейросети: 8\/10\n\n<b>/);
+  assert.match(own.editorText, /^Оценка нейросети: 8\/10\n\n🧠 <b>/);
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
@@ -263,6 +325,12 @@ test('бот редактора: узлы, ветки и кнопки', () => {
     Нейросеть: 'n8n-nodes-base.httpRequest',
     'Новый черновик': 'n8n-nodes-base.code',
     'Черновик редактору': 'n8n-nodes-base.telegram',
+    'Как править?': 'n8n-nodes-base.if',
+    'Удалить черновик': 'n8n-nodes-base.telegram',
+    Решение: 'n8n-nodes-base.telegram',
+    'С обложкой?': 'n8n-nodes-base.if',
+    Обложка: 'n8n-nodes-base.httpRequest',
+    'Черновик с обложкой': 'n8n-nodes-base.telegram',
   };
   for (const [name, type] of Object.entries(types)) assert.strictEqual(byName[name] && byName[name].type, type, name);
   assert.strictEqual(wf.active, false);
@@ -273,10 +341,20 @@ test('бот редактора: узлы, ветки и кнопки', () => {
   assert.deepStrictEqual(next('Настройки'), ['Действие']);
   assert.deepStrictEqual(next('Действие').sort(), ['Нажатие?', 'Переписать?', 'Правка?']);
   assert.deepStrictEqual(next('Нажатие?'), ['Ответ на нажатие']);
-  assert.deepStrictEqual(next('Правка?'), ['Правка черновика']);
+  assert.deepStrictEqual(next('Правка?'), ['Как править?']);
+  // Черновик с обложкой удаляется и приходит новым сообщением, текстовый правится на месте.
+  assert.deepStrictEqual(next('Как править?'), ['Удалить черновик']);
+  assert.deepStrictEqual(wf.connections['Как править?'].main[1].map((c) => c.node), ['Правка черновика']);
+  assert.deepStrictEqual(next('Удалить черновик'), ['Решение']);
+  assert.strictEqual(byName['Удалить черновик'].parameters.operation, 'deleteMessage');
   assert.deepStrictEqual(next('Переписать?'), ['Нейросеть']);
   assert.deepStrictEqual(next('Нейросеть'), ['Новый черновик']);
-  assert.deepStrictEqual(next('Новый черновик'), ['Черновик редактору']);
+  assert.deepStrictEqual(next('Новый черновик'), ['С обложкой?']);
+  assert.deepStrictEqual(next('С обложкой?'), ['Обложка']);
+  assert.deepStrictEqual(next('Обложка'), ['Черновик с обложкой']);
+  for (const n of ['С обложкой?', 'Обложка', 'Черновик с обложкой']) {
+    assert.deepStrictEqual(wf.connections[n].main[1].map((c) => c.node), ['Черновик редактору'], n);
+  }
   // Ветка «нет» у условий никуда не ведёт.
   for (const n of ['Нажатие?', 'Правка?', 'Переписать?']) assert.ok(!wf.connections[n].main[1] || !wf.connections[n].main[1].length, n);
 
@@ -289,9 +367,10 @@ test('бот редактора: узлы, ветки и кнопки', () => {
   assert.strictEqual(edit.additionalFields.parse_mode, 'HTML');
   assert.strictEqual(byName['Нейросеть'].parameters.nodeCredentialType, 'openAiApi');
   const buttons = byName['Черновик редактору'].parameters.inlineKeyboard.rows[0].row.buttons;
+  const id = "$json.id ?? $('Новый черновик').item.json.id";
   assert.deepStrictEqual(
     buttons.map((b) => b.additionalFields.callback_data),
-    ['=pub:{{ $json.id }}', '=rew:{{ $json.id }}', '=rej:{{ $json.id }}']
+    [`=pub:{{ ${id} }}`, `=rew:{{ ${id} }}`, `=rej:{{ ${id} }}`]
   );
   assert.match(byName['Черновик редактору'].parameters.chatId, /EDITOR_CHAT_ID/);
 });
@@ -393,4 +472,48 @@ test('бот редактора: «Переписать» с пометкой, �
   assert.strictEqual(db.read(id).post, row.post);
   assert.strictEqual(db.read(id).status, 'collected');
   db.done();
+});
+
+test('бот редактора: черновик с обложкой, решение и переписывание по частям', { skip }, async () => {
+  const wf = load('editor.json');
+  const { createLog } = require('../src/log.js');
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'cf-'));
+  const file = path.join(tmp, 'log.sqlite');
+  const conn = new DatabaseSync(file);
+  const log = createLog(conn);
+  log.init();
+  const card = { emoji: '🧠', tag: 'модели', title: 'Открыта модель', lead: 'Прежняя суть новости о модели.', points: ['пункт один'], image: 'https://example.com/i.jpg', telegraph: 'https://telegra.ph/x-10-13' };
+  const ids = [1, 2].map((n) => {
+    const { item } = log.collected({ link: `https://example.com/c${n}`, title: `Модель ${n}`, source: 'Пример', description: 'Описание из ленты.' });
+    log.drafted(item.link, `🧠 <b>Открыта модель</b>\n\nПрежняя суть.`, { relevance: 7, card: JSON.stringify(card) });
+    return item.id;
+  });
+  conn.close();
+  const settings = j([{ CF_DB_PATH: file, EDITOR_CHAT_ID: String(EDITOR_CHAT) }]);
+
+  // Нажатие под фото: сообщение заменяется новым.
+  const press = tgPress(`pub:${ids[0]}`);
+  press.callback_query.message.photo = [{ file_id: 'x' }];
+  const [pub] = (await runNode(wf, 'Действие', settings, { Настройки: settings, Телеграм: j([press]) })).map((x) => x.json);
+  assert.strictEqual(pub.editMode, 'replace');
+  // Текстовый черновик правится на месте.
+  const [txt] = (await runNode(wf, 'Действие', settings, { Настройки: settings, Телеграм: j([tgPress(`rew:${ids[1]}`)]) })).map((x) => x.json);
+  assert.strictEqual(txt.editMode, 'edit');
+  // Промпт переписывания видит суть и пункты, заголовок не меняется.
+  assert.match(txt.prompt, /Заголовок и рубрику не меняй/);
+  assert.match(txt.prompt, /Прежний пост:\n🧠 Открыта модель\nПрежняя суть новости о модели\.\n- пункт один/);
+
+  const nodes = { Настройки: settings, Действие: j([txt]) };
+  const answer = { choices: [{ message: { content: JSON.stringify({ relevance: 5, emoji: '🚀', lead: 'Новая короткая суть о модели.', points: ['новый пункт'] }) } }] };
+  const [ok] = (await runNode(wf, 'Новый черновик', j([answer]), nodes)).map((x) => x.json);
+  assert.strictEqual(ok.rewritten, true);
+  assert.match(ok.editorText, /^Переписано\. Оценка нейросети: 5\/10\n\n🚀 <b>Открыта модель<\/b>\n\nНовая короткая суть/);
+  assert.match(ok.editorText, /Читать подробнее/);
+  assert.strictEqual(ok.photo, true);
+  assert.strictEqual(ok.cover.title, 'Открыта модель');
+  const c2 = new DatabaseSync(file);
+  const saved = JSON.parse(createLog(c2).byId(ids[1]).card);
+  c2.close();
+  assert.deepStrictEqual([saved.emoji, saved.lead, saved.title, saved.telegraph], ['🚀', 'Новая короткая суть о модели.', 'Открыта модель', 'https://telegra.ph/x-10-13']);
+  fs.rmSync(tmp, { recursive: true, force: true });
 });

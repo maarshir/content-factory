@@ -30,6 +30,12 @@ function runNode(wf, name, input, nodes) {
   return new AsyncFunction('$input', '$', 'require', node.parameters.jsCode)(wrap(input), $, req);
 }
 
+// «Разбор» и «Сборка поста» подряд (без страницы Телеграфа), как в конвейере сбора.
+async function draftAndBuild(wf, input, nodes) {
+  nodes['Разбор'] = await runNode(wf, 'Разбор', input, nodes);
+  return runNode(wf, 'Сборка поста', nodes['Разбор'], nodes);
+}
+
 test('в «Настройках» сбора есть PLATFORM, по умолчанию telegram', () => {
   const wf = load('collect.json');
   const settings = wf.nodes.find((n) => n.name === 'Настройки').parameters.assignments.assignments;
@@ -49,7 +55,7 @@ test('сбор под ВКонтакте: промпт vk.md, простой т�
   assert.match(nodes['Промпт'][0].json.prompt, /Заголовок: Открыта модель & код/);
 
   const answer = (o) => ({ choices: [{ message: { content: JSON.stringify(o) } }] });
-  const drafts = await runNode(wf, 'Разбор и пост', j([answer({ relevance: 8, text: description })]), nodes);
+  const drafts = await draftAndBuild(wf, j([answer({ relevance: 8, text: description })]), nodes);
   const d = drafts[0].json;
   assert.strictEqual(d.text, `Открыта модель & код\n\n${description}\n\nИсточник: Пример\nhttps://example.com/v1`);
   // Редактору текст уходит с parse_mode HTML, поэтому & экранирован; пометка о совпадениях на месте.
@@ -105,7 +111,7 @@ test('сбор под MAX: промпт max.md, пост в HTML, редакто
 
   const text = 'Вышла открытая модель для распознавания речи, веса уже доступны.';
   const answer = { choices: [{ message: { content: JSON.stringify({ relevance: 7, text }) } }] };
-  const d = (await runNode(wf, 'Разбор и пост', j([answer]), nodes))[0].json;
+  const d = (await draftAndBuild(wf, j([answer]), nodes))[0].json;
   assert.strictEqual(d.text, `<b>Языковая модель &amp; речь</b>\n\n${text}\n\nИсточник: <a href="https://example.com/m1">Пример</a>`);
   assert.ok(d.editorText.endsWith('\n\n' + d.text));
   fs.rmSync(tmp, { recursive: true, force: true });

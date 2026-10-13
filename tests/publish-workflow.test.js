@@ -42,6 +42,9 @@ test('публикация: узлы и порядок', () => {
     'MAX или Телеграм': 'if',
     'Отправка в MAX': 'httpRequest',
     'Отправка в канал': 'telegram',
+    'С обложкой?': 'if',
+    Обложка: 'httpRequest',
+    'Отправка с обложкой': 'telegram',
     Итог: 'code',
   };
   for (const [name, t] of Object.entries(types)) {
@@ -53,7 +56,15 @@ test('публикация: узлы и порядок', () => {
   assert.deepStrictEqual(next('Следующий пост'), [['Площадка']]);
   // Первый выход if (условие верно) ведёт во ВКонтакте, второй к выбору между MAX и Телеграмом.
   assert.deepStrictEqual(next('Площадка'), [['Отправка во ВКонтакте'], ['MAX или Телеграм']]);
-  assert.deepStrictEqual(next('MAX или Телеграм'), [['Отправка в MAX'], ['Отправка в канал']]);
+  assert.deepStrictEqual(next('MAX или Телеграм'), [['Отправка в MAX'], ['С обложкой?']]);
+  // Пост с частями уходит подписью к обложке; без обложки или если сервис не ответил, текстом.
+  assert.deepStrictEqual(next('С обложкой?'), [['Обложка'], ['Отправка в канал']]);
+  assert.deepStrictEqual(next('Обложка'), [['Отправка с обложкой'], ['Отправка в канал']]);
+  assert.deepStrictEqual(next('Отправка с обложкой'), [['Итог']]);
+  const photo = byName['Отправка с обложкой'].parameters;
+  assert.strictEqual(photo.operation, 'sendPhoto');
+  assert.match(photo.chatId, /TELEGRAM_CHANNEL_ID/);
+  assert.strictEqual(photo.additionalFields.caption, "={{ $('Следующий пост').first().json.text }}");
   assert.deepStrictEqual(next('Отправка во ВКонтакте'), [['Итог']]);
   assert.deepStrictEqual(next('Отправка в MAX'), [['Итог']]);
   assert.deepStrictEqual(next('Отправка в канал'), [['Итог']]);
@@ -68,9 +79,9 @@ test('публикация: узлы и порядок', () => {
   assert.strictEqual(settings.PLATFORM, 'telegram');
   const send = byName['Отправка в канал'];
   assert.match(send.parameters.chatId, /TELEGRAM_CHANNEL_ID/);
-  assert.strictEqual(send.parameters.text, '={{ $json.text }}');
+  assert.strictEqual(send.parameters.text, "={{ $('Следующий пост').first().json.text }}");
   assert.strictEqual(send.parameters.additionalFields.parse_mode, 'HTML');
-  for (const name of ['Отправка в канал', 'Отправка во ВКонтакте', 'Отправка в MAX']) {
+  for (const name of ['Отправка в канал', 'Отправка с обложкой', 'Отправка во ВКонтакте', 'Отправка в MAX']) {
     assert.strictEqual(byName[name].onError, 'continueRegularOutput', name);
     assert.ok(!byName[name].retryOnFail, `${name}: повтор отправки может дать пост дважды`);
   }
@@ -142,6 +153,9 @@ test('публикация: пост уходит в канал и помеча�
     text: '<b>Пост 1</b>',
     platform: 'telegram',
     ownerId: '',
+    // Старый черновик без частей уходит текстом.
+    photo: false,
+    cover: null,
   });
 
   // Синтетический ответ API Телеграма.
@@ -153,6 +167,28 @@ test('публикация: пост уходит в канал и помеча�
 
   // Сразу после публикации следующий пост ждёт интервала.
   assert.deepStrictEqual(await runNode(wf, 'Следующий пост', [], nodes), []);
+  done();
+});
+
+test('публикация: пост с частями уходит подписью к обложке', { skip }, async () => {
+  const wf = withoutQuiet(load());
+  const { log, done, nodes } = setup();
+  const link = 'https://example.com/p1';
+  const card = JSON.stringify({ emoji: '🧠', tag: 'модели', title: 'Пост 1', lead: 'Суть', points: [], image: 'https://example.com/i.jpg', telegraph: '' });
+  const conn = new DatabaseSync(nodes['Настройки'][0].json.CF_DB_PATH);
+  conn.prepare('UPDATE items SET card = ? WHERE link = ?').run(card, link);
+  conn.close();
+  const [post] = await runNode(wf, 'Следующий пост', [], nodes);
+  assert.strictEqual(post.json.photo, true);
+  assert.deepStrictEqual(post.json.cover, {
+    title: 'Пост 1', tag: 'модели', image: 'https://example.com/i.jpg', channel: 'Нейросети: главное за день', handle: '@neiro_glav',
+  });
+  // Подпись длиннее 1024 знаков: пост уходит текстом.
+  const conn2 = new DatabaseSync(nodes['Настройки'][0].json.CF_DB_PATH);
+  conn2.prepare('UPDATE items SET post = ? WHERE link = ?').run('<b>Пост 1</b>\n\n' + 'а'.repeat(1100), link);
+  conn2.close();
+  const [long] = await runNode(wf, 'Следующий пост', [], nodes);
+  assert.strictEqual(long.json.photo, false);
   done();
 });
 

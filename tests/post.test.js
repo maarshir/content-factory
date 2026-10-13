@@ -66,9 +66,11 @@ test('промпт: подстановка полей, неизвестные о
 
 test('промпт Телеграма: все поля подставляются, просит JSON', () => {
   const tpl = fs.readFileSync(path.join(__dirname, '..', 'prompts', 'telegram.md'), 'utf8');
-  const filled = fillPrompt(tpl, { title: 'T', description: 'D', link: 'https://a.ru', maxLength: 900 });
+  const filled = fillPrompt(tpl, { title: 'T', description: 'D', article: 'A', link: 'https://a.ru', maxLength: 900 });
   assert.ok(!/\{\{\s*\w+\s*\}\}/.test(filled));
-  assert.ok(filled.includes('"relevance"') && filled.includes('"text"'));
+  // Пост по частям: рубрика, эмодзи, заголовок обложки, суть, пункты, подробный пересказ.
+  for (const k of ['relevance', 'tag', 'emoji', 'title', 'lead', 'points', 'full']) assert.ok(filled.includes(`"${k}"`), k);
+  assert.ok(filled.includes('Нейросети: главное за день'));
 });
 
 const { buildVkPost, buildPostFor, platformOf, VK_TEXT_LIMIT } = require('../src/post');

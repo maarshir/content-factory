@@ -26,6 +26,13 @@ function sourceName(i) {
   }
 }
 
+function rssImage(j) {
+  const e = j && j.enclosure;
+  const url = e && typeof e === 'object' ? String(e.url || '') : '';
+  const type = e && typeof e === 'object' ? String(e.type || '') : '';
+  return /^https?:\/\//i.test(url) && (/^image\//i.test(type) || /\.(jpe?g|png|webp)(\?|$)/i.test(url)) ? url : '';
+}
+
 const items = $input
   .all()
   .map((it, i) => ({
@@ -33,6 +40,8 @@ const items = $input
     link: String(it.json.link || '').trim(),
     description: plain(it.json.contentSnippet || it.json.content || it.json.description),
     source: sourceName(i),
+    // Картинка из ленты (enclosure), запасная к картинке со страницы статьи.
+    image: rssImage(it.json),
   }))
   // Ошибка чтения ленты приходит элементом без ссылки: такие пропускаются.
   .filter((x) => x.link);
@@ -58,7 +67,7 @@ try {
     const c = log.collected(a);
     if (!c.added) continue;
     out.push({
-      json: { id: c.item.id, title: a.title, link: a.link, description: a.description, source: a.source },
+      json: { id: c.item.id, title: a.title, link: a.link, description: a.description, source: a.source, image: a.image },
     });
   }
   return out;

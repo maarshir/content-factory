@@ -47,7 +47,9 @@ function parseUpdate(update, options = {}) {
     const q = u.callback_query;
     const msg = q.message || {};
     const chatId = msg.chat ? msg.chat.id : null;
-    const base = { callbackQueryId: String(q.id || ''), chatId, messageId: msg.message_id ?? null };
+    // photo: черновик с обложкой. Текст подписи не правится узлом Telegram n8n,
+    // поэтому такое сообщение после решения заменяется новым (см. editor-action.js).
+    const base = { callbackQueryId: String(q.id || ''), chatId, messageId: msg.message_id ?? null, photo: Boolean(msg.photo) };
     if (!allowed(chatId)) return { kind: 'denied', ...base };
     const m = String(q.data || '').match(CALLBACK);
     if (!m) return { kind: 'ignore', ...base };
@@ -60,7 +62,7 @@ function parseUpdate(update, options = {}) {
     if (!allowed(chatId)) return { kind: 'ignore' };
     const id = idFromKeyboard(msg.reply_to_message.reply_markup);
     if (id === null) return { kind: 'ignore' };
-    const base = { callbackQueryId: '', chatId, messageId: msg.reply_to_message.message_id, id };
+    const base = { callbackQueryId: '', chatId, messageId: msg.reply_to_message.message_id, id, photo: Boolean(msg.reply_to_message.photo) };
     const text = msg.text.trim();
     if (REJECT_REPLY.test(text)) {
       return { kind: 'reply', action: 'reject', note: short(text.replace(REJECT_REPLY, ''), NOTE_LIMIT), ...base };

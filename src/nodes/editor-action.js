@@ -5,7 +5,9 @@
 // @include src/log.js as logLib
 // @include src/editor.js as editorLib
 // @include src/post.js as postLib
+// @include src/card.js as cardLib
 // @include prompts/rewrite.md as PROMPT
+// @include prompts/rewrite-telegram.md as PROMPT_TELEGRAM
 
 const { DatabaseSync } = require('node:sqlite');
 const settings = $('Настройки').first().json;
@@ -34,16 +36,26 @@ if (cmd.kind === 'button' || cmd.kind === 'reply') {
   result = editorLib.applyAction(null, cmd);
 }
 
-const prompt = result.rewrite
-  ? postLib.fillPrompt(PROMPT, {
-      channel: CHANNEL[platform],
-      title: item.title,
-      link: item.link,
-      draft: editorLib.draftBody(item.post, item.title),
-      note: result.rewrite.note,
-      maxLength,
-    })
-  : '';
+// Пост по частям (Телеграм с обложкой): нейросеть видит суть и пункты, заголовок
+// и рубрика остаются прежними, на них держится обложка.
+const card = item ? cardLib.readCard(item.card) : null;
+const prompt = !result.rewrite
+  ? ''
+  : card
+    ? postLib.fillPrompt(PROMPT_TELEGRAM, {
+        title: card.title,
+        link: item.link,
+        draft: [`${card.emoji} ${card.title}`, card.lead, ...(card.points || []).map((p) => '- ' + p)].join('\n'),
+        note: result.rewrite.note,
+      })
+    : postLib.fillPrompt(PROMPT, {
+        channel: CHANNEL[platform],
+        title: item.title,
+        link: item.link,
+        draft: editorLib.draftBody(item.post, item.title),
+        note: result.rewrite.note,
+        maxLength,
+      });
 
 return [
   {
@@ -56,6 +68,9 @@ return [
       messageId: cmd.messageId ?? '',
       answer: result.answer,
       editText: result.editText,
+      // replace: черновик с обложкой, его подпись не правится, поэтому сообщение
+      // удаляется и вместо него приходит новое с тем же текстом решения.
+      editMode: result.editText ? (cmd.photo ? 'replace' : 'edit') : '',
       prompt,
     },
   },

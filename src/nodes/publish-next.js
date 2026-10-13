@@ -5,6 +5,7 @@
 // @include src/queue.js as queueLib
 // @include src/post.js as postLib
 // @include src/plain.js as plainLib
+// @include src/card.js as cardLib
 // @include src/publish.config.json as CONFIG
 
 const { DatabaseSync } = require('node:sqlite');
@@ -36,7 +37,14 @@ try {
   if (!item) return [];
   // Черновик собран под площадку сбора; если она другая, текст переводится (src/plain.js).
   const text = plainLib.textFor(platform, item.post);
-  const json = { id: item.id, link: item.link, text, platform, ownerId };
+  const json = { id: item.id, link: item.link, text, platform, ownerId, photo: false, cover: null };
+  // Телеграм: пост с частями (card) уходит подписью к обложке, если влезает в 1024 знака.
+  // Старые черновики без частей и слишком длинные уходят текстом, как раньше.
+  const card = platform === 'telegram' ? cardLib.readCard(item.card) : null;
+  if (card && postLib.visibleLength(text) <= postLib.TELEGRAM_CAPTION_LIMIT) {
+    json.photo = true;
+    json.cover = cardLib.coverRequest(card, cardLib.channelOf(settings));
+  }
   if (platform === 'max') Object.assign(json, { chatId, format: postLib.MAX_FORMAT });
   return [{ json }];
 } finally {

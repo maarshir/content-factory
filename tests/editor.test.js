@@ -28,8 +28,12 @@ const reply = (text, id = 3, chatId = -100500) => ({
 
 test('нажатия кнопок разбираются в команды', () => {
   assert.deepStrictEqual(parseUpdate(press('pub:12'), { editorChatId: EDITOR }), {
-    kind: 'button', action: 'publish', id: 12, note: '', callbackQueryId: 'q1', chatId: -100500, messageId: 77,
+    kind: 'button', action: 'publish', id: 12, note: '', callbackQueryId: 'q1', chatId: -100500, messageId: 77, photo: false,
   });
+  // Черновик с обложкой: сообщение с фото, его подпись после решения заменяется новым сообщением.
+  const photo = press('pub:12');
+  photo.callback_query.message.photo = [{ file_id: 'x' }];
+  assert.strictEqual(parseUpdate(photo, { editorChatId: EDITOR }).photo, true);
   assert.strictEqual(parseUpdate(press('rew:5'), { editorChatId: EDITOR }).action, 'rewrite');
   assert.strictEqual(parseUpdate(press('rej:5'), { editorChatId: EDITOR }).action, 'reject');
   assert.strictEqual(parseUpdate(press('del:5'), { editorChatId: EDITOR }).kind, 'ignore');
@@ -47,7 +51,7 @@ test('доступ только из чата редактора', () => {
 test('ответ на черновик: пометка для переписывания или отказ с причиной', () => {
   const r = parseUpdate(reply('  Короче, без цифр  '), { editorChatId: EDITOR });
   assert.deepStrictEqual(r, {
-    kind: 'reply', action: 'rewrite', note: 'Короче, без цифр', callbackQueryId: '', chatId: -100500, messageId: 77, id: 3,
+    kind: 'reply', action: 'rewrite', note: 'Короче, без цифр', callbackQueryId: '', chatId: -100500, messageId: 77, id: 3, photo: false,
   });
   const x = parseUpdate(reply('Отклонить: реклама'), { editorChatId: EDITOR });
   assert.deepStrictEqual([x.action, x.note], ['reject', 'реклама']);
